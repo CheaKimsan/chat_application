@@ -1,46 +1,12 @@
 import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useOutletContext } from "react-router-dom";
-import { UserResponse } from "./core/model";
-import { MessageResponse } from "../../components/auth/core/model";
-import { reqGetMessages } from "../../api/reqMessage";
 import { useAuthStore } from "../../store/auth.store";
 import { sendMarkRead } from "../../socket/socketClient";
-
-function formatBytes(bytes: number): string {
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-// Loading Spinner Component
-const LoadingSpinner = ({ progress, loaded, total }: { progress?: number; loaded?: number; total?: number }) => (
-    <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 8,
-        padding: '12px 16px',
-        borderRadius: 12,
-        backgroundColor: '#1a1a1a',
-        border: '1px solid #333',
-        width: 'fit-content',
-        alignSelf: 'flex-start'
-    }}>
-        <div style={{
-            width: 16,
-            height: 16,
-            border: '2px solid #333',
-            borderTop: '2px solid #4F46E5',
-            borderRadius: '50%',
-            animation: 'spin 0.8s linear infinite',
-        }} />
-        <span style={{ color: '#8B92A0', fontSize: 14 }}>
-            Uploading...
-            {progress !== undefined && ` ${progress}%`}
-            {loaded !== undefined && total !== undefined && ` · ${formatBytes(loaded)} / ${formatBytes(total)}`}
-        </span>
-    </div>
-);
+import {UserResponse} from "../../components/user/core/model";
+import {LoadingSpinner} from "../../shared/LoadingSpinner";
+import {MessageResponse} from "../../components/message/core/model";
+import {reqGetMessages} from "../../components/message/core/request";
 
 export default function ChatWindow() {
     const { selectedContact, isUploading, uploadProgress, uploadedBytes, uploadTotalBytes } = useOutletContext<{
@@ -82,7 +48,6 @@ export default function ChatWindow() {
         return () => window.removeEventListener("chat:key_ready", handleKeyReady);
     }, [queryClient, selectedContact?.id]);
 
-    // --- incoming new messages ---
     useEffect(() => {
         if (!selectedContact?.id) return;
 
@@ -95,9 +60,6 @@ export default function ChatWindow() {
                 String(incoming.to_user) === String(selectedContact.id);
 
             if (!isRelevant) return;
-
-            // socketClient emits decrypted text separately as `plaintext` — fold it
-            // into `body` (what the UI actually renders) here.
 
             const normalized: MessageResponse = {
                 ...incoming,

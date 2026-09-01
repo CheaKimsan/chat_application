@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { UserPlus, X } from "lucide-react";
-import InviteForm from "../components/auth/InviteUser";
+import InviteForm from "../components/auth/register/InviteUser";
 
 export default function InviteButton() {
     const [isOpen, setIsOpen] = useState<boolean>(false);

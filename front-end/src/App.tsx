@@ -1,11 +1,11 @@
 import { Routes, Route } from 'react-router-dom';
-import LoginForm from './components/auth/LoginForm';
-import ProtectedRoute from './components/auth/ProtectedRoute';
+import ProtectedRoute from './routes/ProtectedRoute';
 import Layout from './pages/components/Layout';
 import ChatWindow from "./pages/components/ChatWindow";
-import RegisterForm from './components/auth/RegisterForm';
-import ForgotPasswordForm from './components/auth/ForgotPassword';
-import ResetPasswordForm from './components/auth/ResetPasswordForm';
+import LoginForm from "./components/auth/login/LoginForm";
+import RegisterForm from "./components/auth/register/RegisterForm";
+import ForgotPasswordForm from "./components/auth/forgot-password/ForgotPassword";
+import ResetPasswordForm from "./components/auth/forgot-password/ResetPasswordForm";
 
 function App() {
 

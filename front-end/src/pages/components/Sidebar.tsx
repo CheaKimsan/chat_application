@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import { useAuthStore } from "../../store/auth.store";
 import { useQuery } from "@tanstack/react-query";
-import { reqGetUsers } from "../../api/requestUser";
-import { UserResponse } from "./core/model";
+import {UserResponse} from "../../components/user/core/model";
+import {reqGetUsers} from "../../components/user/core/request";
 
 const C = {
     bg: "#0F1113",
@@ -30,26 +30,26 @@ type TypingPayload = {
     is_typing: boolean;
 };
 
-type PresenceState = "online" | "away" | "offline";
+// type PresenceState = "online" | "away" | "offline";
 
-function getPresenceMeta(id?: string | number) {
-    const seed = typeof id === "undefined" ? 0 : String(id)
-        .split("")
-        .reduce((sum, ch) => sum + ch.charCodeAt(0), 0);
-
-    const state: PresenceState = seed % 5 === 0 ? "offline" : seed % 3 === 0 ? "away" : "online";
-
-    const label =
-        state === "online"
-            ? "Online"
-            : state === "away"
-                ? `Last active ${((seed % 8) + 2).toString()}m ago`
-                : `Offline since ${(seed % 12) + 2}h ago`;
-
-    const color = state === "online" ? C.accent : state === "away" ? "#FBBF24" : "#8B92A0";
-
-    return { state, label, color };
-}
+// function getPresenceMeta(id?: string | number) {
+//     const seed = typeof id === "undefined" ? 0 : String(id)
+//         .split("")
+//         .reduce((sum, ch) => sum + ch.charCodeAt(0), 0);
+//
+//     const state: PresenceState = seed % 5 === 0 ? "offline" : seed % 3 === 0 ? "away" : "online";
+//
+//     const label =
+//         state === "online"
+//             ? "Online"
+//             : state === "away"
+//                 ? `Last active ${((seed % 8) + 2).toString()}m ago`
+//                 : `Offline since ${(seed % 12) + 2}h ago`;
+//
+//     const color = state === "online" ? C.accent : state === "away" ? "#FBBF24" : "#8B92A0";
+//
+//     return { state, label, color };
+// }
 
 function useTypingUsers(currentUserId: string | number | undefined) {
     const [typingUsers, setTypingUsers] = useState<Set<string>>(new Set());
@@ -134,10 +134,8 @@ export default function Sidebar({ onSelectContact }: SidebarProps) {
         queryFn: reqGetUsers,
     });
 
-    // Live set of user IDs currently typing to me
     const typingUsers = useTypingUsers(user?.id);
 
-    // Map fetched users into contact rows, excluding the logged-in user.
     const myPresence = {
         label: user ? (onlineUsers.has(String(user.id)) ? "Online" : "Offline") : "Not signed in",
         color: user ? (onlineUsers.has(String(user.id)) ? C.accent : C.muted) : C.muted,

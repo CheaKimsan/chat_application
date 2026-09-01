@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { UserResponse } from "../pages/components/core/model";
+import {UserResponse} from "../components/user/core/model";
 
 export type MessageStatus = "sending" | "sent" | "delivered" | "read" | "failed";
 

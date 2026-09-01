@@ -1,52 +1,23 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Outlet, useNavigate } from 'react-router-dom';
 import ChatHeader from './Header';
-import { UserResponse } from './core/model';
 import { useAuthStore } from '../../store/auth.store';
 import Sidebar from './Sidebar';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { reqSendMessage, reqUploadFile } from "../../api/reqMessage";
 import { useTypingUsers } from '../../store/typing.store';
 import { connectSocket, disconnectSocket, sendTyping } from '../../socket/socketClient';
-import InviteButton from "../../utils/Invitebutton";
+import UserMenu from "../../shared/UserMenu";
+import {UserResponse} from "../../components/user/core/model";
+import {reqSendMessage, reqUploadFile} from "../../components/message/core/request";
 
-function formatBytes(bytes: number): string {
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-const LoadingSpinner = ({ progress, loaded, total, count }: { progress?: number; loaded?: number; total?: number; count?: number }) => (
-    <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 8,
-        padding: '12px 16px',
-        borderRadius: 12,
-        backgroundColor: '#1a1a1a',
-        border: '1px solid #333',
-        width: 'fit-content'
-    }}>
-        <div style={{
-            width: 16,
-            height: 16,
-            border: '2px solid #333',
-            borderTop: '2px solid #4F46E5',
-            borderRadius: '50%',
-            animation: 'spin 0.8s linear infinite',
-        }} />
-        <span style={{ color: '#8B92A0', fontSize: 14 }}>
-            Uploading{count && count > 1 ? ` ${count} files` : ''}...
-            {progress !== undefined && ` ${progress}%`}
-            {loaded !== undefined && total !== undefined && ` · ${formatBytes(loaded)} / ${formatBytes(total)}`}
-        </span>
-    </div>
-);
 
 export default function Layout() {
     const user = useAuthStore((s) => s.user);
     const token = useAuthStore((s) => s.token);
     const queryClient = useQueryClient();
+
+    const clearUser = useAuthStore((s) => s.clearUser);
+    const navigate = useNavigate();
 
     useEffect(() => {
         if (!token) return;
@@ -55,7 +26,6 @@ export default function Layout() {
             disconnectSocket();
         };
     }, [token]);
-
 
 
     const [selectedContact, setSelectedContact] = useState<UserResponse | undefined>(undefined);
@@ -95,9 +65,7 @@ export default function Layout() {
     const [uploadFileCount, setUploadFileCount] = useState(0);
     const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-    // inside Layout component
-    const clearUser = useAuthStore((s) => s.clearUser);
-    const navigate = useNavigate();
+
 
     const handleLogout = () => {
         disconnectSocket();
@@ -229,26 +197,31 @@ export default function Layout() {
                         gap: 8,
                     }}
                 >
-                    <InviteButton />
-                    <button
-                        onClick={handleLogout}
+                    <div
                         style={{
-                            padding: '6px 12px',
-                            borderRadius: 6,
-                            border: '1px solid #2A2D32',
-                            background: '#101317',
-                            color: '#E7E3DA',
-                            cursor: 'pointer',
-                            fontWeight: 600,
-                            fontSize: 13,
+                            position: 'absolute',
+                            top: 12,
+                            right: 16,
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 8,
                         }}
                     >
-                        Logout
-                    </button>
+                        {user && <UserMenu username={user.username} email={user.email} onLogout={handleLogout}/>}
+                    </div>
                 </div>
-                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, overflow: 'hidden' }}>
-                    <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', minHeight: 0 }}>
-                        <Outlet context={{ outletInput, setOutletInput, selectedContact, isUploading, uploadProgress, uploadedBytes, uploadTotalBytes, uploadFileCount }} />
+                <div style={{flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, overflow: 'hidden'}}>
+                    <div style={{flex: 1, overflowY: 'auto', overflowX: 'hidden', minHeight: 0}}>
+                        <Outlet context={{
+                            outletInput,
+                            setOutletInput,
+                            selectedContact,
+                            isUploading,
+                            uploadProgress,
+                            uploadedBytes,
+                            uploadTotalBytes,
+                            uploadFileCount
+                        }}/>
                     </div>
 
                     <form
