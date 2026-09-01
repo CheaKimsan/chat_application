@@ -13,8 +13,10 @@ type RegisterRequest struct {
 }
 
 type LoginRequest struct {
-	Username string `json:"username"`
-	Password string `json:"password"`
+	Username string  `json:"username"`
+	Password string  `json:"password"`
+	Email    *string `json:"email"`
+	Role     *string `json:"role"`
 }
 
 type UpdateUserRequest struct {

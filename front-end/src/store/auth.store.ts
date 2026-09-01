@@ -14,7 +14,6 @@ interface AuthState {
     clearUser: () => void;
 }
 
-// Initialize from localStorage so routes work after refresh / direct navigation
 function loadInitialUser(): { user: User | null; token: string | null } {
     try {
         const token = localStorage.getItem('token');

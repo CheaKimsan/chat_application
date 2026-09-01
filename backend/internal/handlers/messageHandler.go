@@ -29,11 +29,6 @@ func NewMessageHandler(messages *services.MessageService, uploads *services.Uplo
 	return &MessageHandler{messages: messages, uploads: uploads, pool: pool}
 }
 
-// RegisterRoutes wires up the message routes, e.g. in router.go:
-//
-//	messages := api.Group("/messages")
-//	messages.Use(middleware.AuthMiddleware(jwtSecret))
-//	messageHandler.RegisterRoutes(messages)
 func (h *MessageHandler) RegisterRoutes(router *gin.RouterGroup) {
 	router.GET("", h.Websocket)
 	router.GET("/:userId", h.GetConversation)
@@ -126,7 +121,6 @@ func (h *MessageHandler) Upload(c *gin.Context) {
 		c.JSON(http.StatusForbidden, gin.H{"message": "you cannot upload a file to this message"})
 		return
 	}
-
 	// Parse form with enough headroom for multiple files.
 	if err := c.Request.ParseMultipartForm(services.MaxUploadSize * int64(services.MaxFilesPerUpload)); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"message": "files too large or invalid form"})
@@ -150,7 +144,6 @@ func (h *MessageHandler) Upload(c *gin.Context) {
 
 	saved, failed := h.uploads.SaveMany(c.Request.Context(), callerID, messageID, headers)
 
-	// Notify the recipient once per successfully saved attachment.
 	h.messages.NotifyAttachments(c.Request.Context(), messageID, saved)
 
 	failedResp := make([]gin.H, 0, len(failed))

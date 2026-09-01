@@ -29,9 +29,6 @@ func (r *UserRepository) GetByUsername(ctx context.Context, username string) (*m
 	return &u, nil
 }
 
-// GetByID mirrors GetByUsername — used to re-fetch current user data
-// (role, etc.) when a refresh token is redeemed, rather than trusting
-// stale claims baked into the refresh token itself.
 func (r *UserRepository) GetByID(ctx context.Context, id string) (*models.UserResponse, error) {
 	var u models.UserResponse
 	err := r.db.QueryRowContext(ctx,

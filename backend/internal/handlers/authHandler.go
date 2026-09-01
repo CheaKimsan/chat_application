@@ -61,7 +61,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		"status":        "login success",
 		"access_token":  pair.AccessToken,
 		"refresh_token": pair.RefreshToken,
-		"user":          gin.H{"id": user.ID, "username": user.Username, "role": user.Role},
+		"user":          gin.H{"id": user.ID, "username": user.Username, "email": user.Email, "role": user.Role},
 	})
 }
 

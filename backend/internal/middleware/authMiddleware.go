@@ -2,11 +2,10 @@ package middleware
 
 import (
 	"fmt"
-	"net/http"
-	"strings"
-
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
+	"net/http"
+	"strings"
 )
 
 func AuthMiddleware(jwtSecret []byte) gin.HandlerFunc {
@@ -45,8 +44,6 @@ func AuthMiddleware(jwtSecret []byte) gin.HandlerFunc {
 }
 
 // CallerFromContext pulls the id/role of the authenticated caller out of
-// the claims that AuthMiddleware stashed on the context. Only call this
-// downstream of AuthMiddleware — it panics (via MustGet) otherwise.
 func CallerFromContext(c *gin.Context) (id string, role string) {
 	claims := c.MustGet("claims").(jwt.MapClaims)
 	id, _ = claims["id"].(string)
@@ -54,26 +51,26 @@ func CallerFromContext(c *gin.Context) (id string, role string) {
 	return id, role
 }
 
-// func rateLimit(next http.Handler, rps, burst int) http.Handler {
-// 	clients := make(map[string]*rate.Limiter)
-// 	var mu sync.Mutex
+//func rateLimit(next http.Handler, rps, burst int) http.Handler {
+//	clients := make(map[string]*rate.Limiter)
+//	var mu sync.Mutex
 //
-// 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-// 		ip := realip.FromRequest(r)
+//	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+//		ip := realip.FromRequest(r)
 //
-// 		mu.Lock()
-// 		limiter, ok := clients[ip]
-// 		if !ok {
-// 			limiter = rate.NewLimiter(rate.Limit(rps), burst)
-// 			clients[ip] = limiter
-// 		}
-// 		mu.Unlock()
+//		mu.Lock()
+//		limiter, ok := clients[ip]
+//		if !ok {
+//			limiter = rate.NewLimiter(rate.Limit(rps), burst)
+//			clients[ip] = limiter
+//		}
+//		mu.Unlock()
 //
-// 		if !limiter.Allow() {
-// 			http.Error(w, "too many requests", http.StatusTooManyRequests)
-// 			return
-// 		}
+//		if !limiter.Allow() {
+//			http.Error(w, "too many requests", http.StatusTooManyRequests)
+//			return
+//		}
 //
-// 		next.ServeHTTP(w, r)
-// 	})
-// }
+//		next.ServeHTTP(w, r)
+//	})
+//}

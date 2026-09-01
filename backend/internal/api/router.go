@@ -98,7 +98,6 @@ func NewRouter(db *sql.DB, pool *ws.Pool, jwtSecret []byte, refreshSecret []byte
 	}
 
 	// --- invite wiring: built before authHandler since Signup needs to
-	// consume invites on success ---
 	inviteRepo := repository.NewInviteRepository(db)
 	inviteService := services.NewInviteService(userRepo, inviteRepo, smtpFrom, smtpAppPassword, smtpHost, smtpPort)
 	inviteHandler := handlers.NewInviteHandler(inviteService)
@@ -113,20 +112,6 @@ func NewRouter(db *sql.DB, pool *ws.Pool, jwtSecret []byte, refreshSecret []byte
 	messageService := services.NewMessageService(messageRepo, pool)
 	uploadService := services.NewUploadService(attachmentRepo, minioStore)
 	messageHandler := handlers.NewMessageHandler(messageService, uploadService, pool)
-
-	router.GET("/mypwd", func(c *gin.Context) {
-		cwd, err := os.Getwd()
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"error": err.Error(),
-			})
-			return
-		}
-
-		c.JSON(http.StatusOK, gin.H{
-			"current_folder": cwd,
-		})
-	})
 
 	router.GET("/image/:userId/:messageId/:file", handleImage())
 

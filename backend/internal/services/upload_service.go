@@ -17,11 +17,11 @@ import (
 )
 
 const (
-	MaxUploadSize     = 10 << 20 // 10MB per-file limit (was 10<<50 — that's ~11 PETABYTES, clearly a typo)
-	MaxFilesPerUpload = 10       // safety cap on how many files one request can carry
-	uploadWorkers     = 4        // how many files are saved concurrently per request
+	MaxUploadSize     = 600 << 20 // 10MB per-file limit (was 10<<50 — that's ~11 PETABYTES, clearly a typo)
+	MaxFilesPerUpload = 10        // safety cap on how many files one request can carry
+	uploadWorkers     = 4         // how many files are saved concurrently per request
 
-	// presignedURLTTL controls how long a generated download link stays
+	// presigned URL TTL controls how long a generated download link stays
 	// valid. Stored directly on the attachment record for simplicity —
 	// if you need links that outlive this, regenerate on read instead of
 	// storing a long-lived one.
@@ -157,7 +157,6 @@ func (s *UploadService) SaveMany(ctx context.Context, callerID, messageID string
 	}
 	close(jobs)
 
-	// Close results once all workers finish so the range below terminates.
 	go func() {
 		wg.Wait()
 		close(results)

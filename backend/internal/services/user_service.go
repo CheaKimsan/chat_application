@@ -38,6 +38,7 @@ func (s *UserService) Update(ctx context.Context, callerID, callerRole, targetID
 	}
 
 	var passwordHash *string
+
 	if req.Password != nil {
 		hash, err := bcrypt.GenerateFromPassword([]byte(*req.Password), bcrypt.DefaultCost)
 		if err != nil {
@@ -73,11 +74,6 @@ func (s *UserService) Delete(ctx context.Context, callerID, callerRole, targetID
 }
 
 // GetPublicKey fetches a user's ECDH public key for the E2EE key directory.
-// Translates the repository's raw sql.ErrNoRows into the service-level
-// ErrUserNotFound, and distinguishes "user doesn't exist" from "user exists
-// but never registered a public key" (ErrPublicKeyNotSet) — the latter can
-// happen for accounts created before public_key was required, or if a NULL
-// slipped in some other way.
 func (s *UserService) GetPublicKey(ctx context.Context, userID string) (string, error) {
 	pubKey, err := s.users.GetPublicKeyByID(ctx, userID)
 	if err != nil {
