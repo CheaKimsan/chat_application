@@ -1,4 +1,3 @@
-// hooks/useTypingUsers.ts
 import { useEffect, useState } from "react";
 
 type TypingPayload = {

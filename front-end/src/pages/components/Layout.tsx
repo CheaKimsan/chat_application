@@ -8,6 +8,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { reqSendMessage, reqUploadFile } from "../../api/reqMessage";
 import { useTypingUsers } from '../../store/typing.store';
 import { connectSocket, disconnectSocket, sendTyping } from '../../socket/socketClient';
+import InviteButton from "../../utils/Invitebutton";
 
 function formatBytes(bytes: number): string {
     if (bytes < 1024) return `${bytes} B`;
@@ -218,24 +219,33 @@ export default function Layout() {
             <main style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, height: '100vh', overflow: 'hidden' }}>
                 <ChatHeader contact={contact} isTyping={isTyping} />
 
-                <button
-                    onClick={handleLogout}
+                <div
                     style={{
                         position: 'absolute',
                         top: 12,
                         right: 16,
-                        padding: '6px 12px',
-                        borderRadius: 6,
-                        border: '1px solid #2A2D32',
-                        background: '#101317',
-                        color: '#E7E3DA',
-                        cursor: 'pointer',
-                        fontWeight: 600,
-                        fontSize: 13,
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 8,
                     }}
                 >
-                    Logout
-                </button>
+                    <InviteButton />
+                    <button
+                        onClick={handleLogout}
+                        style={{
+                            padding: '6px 12px',
+                            borderRadius: 6,
+                            border: '1px solid #2A2D32',
+                            background: '#101317',
+                            color: '#E7E3DA',
+                            cursor: 'pointer',
+                            fontWeight: 600,
+                            fontSize: 13,
+                        }}
+                    >
+                        Logout
+                    </button>
+                </div>
                 <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, overflow: 'hidden' }}>
                     <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', minHeight: 0 }}>
                         <Outlet context={{ outletInput, setOutletInput, selectedContact, isUploading, uploadProgress, uploadedBytes, uploadTotalBytes, uploadFileCount }} />
