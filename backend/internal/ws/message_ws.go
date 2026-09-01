@@ -2,8 +2,6 @@ package ws
 
 import "time"
 
-// Message is the payload exchanged over the websocket connection between
-// clients (and persisted to the DB once it represents a chat message).
 type Message struct {
 	Type        string       `json:"type"`         // "new_message" | "typing" | "message_read" | "key_exchange_request" | "key_exchange_response" | "key_exchange_failed"
 	ID          string       `json:"id,omitempty"` // DB id, once persisted
@@ -17,7 +15,6 @@ type Message struct {
 	Reason      string       `json:"reason,omitempty"`     // used by key_exchange_failed
 }
 
-// Attachment describes a file attached to a persisted Message.
 type Attachment struct {
 	ID         string    `json:"id"`
 	MessageID  string    `json:"message_id"`

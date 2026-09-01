@@ -13,6 +13,7 @@ import (
 	"golang-jwt-project/internal/middleware"
 	"golang-jwt-project/internal/repository"
 	"golang-jwt-project/internal/services"
+	"golang-jwt-project/internal/storage"
 	"golang-jwt-project/internal/ws"
 
 	"github.com/gin-contrib/cors"
@@ -83,7 +84,18 @@ func NewRouter(db *sql.DB, pool *ws.Pool, jwtSecret []byte, refreshSecret []byte
 	}
 
 	authService := services.NewAuthService(userRepo, refreshRepo, passwordResetRepo, tokenService, smtpFrom, smtpAppPassword, smtpHost, smtpPort)
-	sessionHandler := handlers.NewSessionHandler(authService) // added — List/Revoke/LogoutAll live on authService
+
+	// --- MinIO wiring ---
+	minioStore, err := storage.NewMinioStorage(
+		os.Getenv("MINIO_ENDPOINT"),
+		os.Getenv("MINIO_ACCESS_KEY"),
+		os.Getenv("MINIO_SECRET_KEY"),
+		os.Getenv("MINIO_BUCKET"),
+		os.Getenv("MINIO_USE_SSL") == "true",
+	)
+	if err != nil {
+		log.Fatalf("failed to connect to MinIO: %v", err)
+	}
 
 	// --- invite wiring: built before authHandler since Signup needs to
 	// consume invites on success ---
@@ -99,7 +111,7 @@ func NewRouter(db *sql.DB, pool *ws.Pool, jwtSecret []byte, refreshSecret []byte
 	messageRepo := repository.NewMessageRepository(db)
 	attachmentRepo := repository.NewAttachmentRepository(db)
 	messageService := services.NewMessageService(messageRepo, pool)
-	uploadService := services.NewUploadService(attachmentRepo)
+	uploadService := services.NewUploadService(attachmentRepo, minioStore)
 	messageHandler := handlers.NewMessageHandler(messageService, uploadService, pool)
 
 	router.GET("/mypwd", func(c *gin.Context) {
@@ -129,13 +141,6 @@ func NewRouter(db *sql.DB, pool *ws.Pool, jwtSecret []byte, refreshSecret []byte
 		messages := api.Group("/messages")
 		messages.Use(middleware.AuthMiddleware(jwtSecret))
 		messageHandler.RegisterRoutes(messages)
-
-		// sessions: view/revoke your own logged-in devices, or log out
-		// of all of them at once. All three routes require auth — you
-		// can only ever see/manage your OWN sessions.
-		sessions := api.Group("/sessions")
-		sessions.Use(middleware.AuthMiddleware(jwtSecret))
-		sessionHandler.RegisterRoutes(sessions)
 
 		// GET /invites/validate is public — the invitee isn't logged in
 		// yet when checking their invite link on the signup page.

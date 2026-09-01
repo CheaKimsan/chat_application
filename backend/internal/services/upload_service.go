@@ -3,25 +3,29 @@ package services
 import (
 	"context"
 	"fmt"
-	"io"
 	"mime/multipart"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"golang-jwt-project/internal/repository"
+	"golang-jwt-project/internal/storage"
 	"golang-jwt-project/internal/ws"
 
 	"github.com/google/uuid"
 )
 
 const (
-	MaxUploadSize     = 10 << 50 // per-file limit
+	MaxUploadSize     = 10 << 20 // 10MB per-file limit (was 10<<50 — that's ~11 PETABYTES, clearly a typo)
 	MaxFilesPerUpload = 10       // safety cap on how many files one request can carry
 	uploadWorkers     = 4        // how many files are saved concurrently per request
-	uploadDir         = "../../uploads"
-	copyBufferSize    = 128 * 1024 // 256KB chunks — tune based on typical file size / memory budget
+
+	// presignedURLTTL controls how long a generated download link stays
+	// valid. Stored directly on the attachment record for simplicity —
+	// if you need links that outlive this, regenerate on read instead of
+	// storing a long-lived one.
+	presignedURLTTL = 7 * 24 * time.Hour
 )
 
 var allowedExts = map[string]bool{
@@ -49,10 +53,11 @@ type UploadFailure struct {
 
 type UploadService struct {
 	attachments *repository.AttachmentRepository
+	storage     *storage.MinioStorage
 }
 
-func NewUploadService(attachments *repository.AttachmentRepository) *UploadService {
-	return &UploadService{attachments: attachments}
+func NewUploadService(attachments *repository.AttachmentRepository, minioStore *storage.MinioStorage) *UploadService {
+	return &UploadService{attachments: attachments, storage: minioStore}
 }
 
 func (s *UploadService) saveOne(ctx context.Context, callerID, messageID string, header *multipart.FileHeader) (ws.Attachment, error) {
@@ -73,36 +78,32 @@ func (s *UploadService) saveOne(ctx context.Context, callerID, messageID string,
 	}
 	defer src.Close()
 
-	messageUploadDir := filepath.Join(uploadDir, "users", callerID, "messages", messageID)
-	if err := os.MkdirAll(messageUploadDir, 0o755); err != nil {
-		return att, fmt.Errorf("failed to prepare upload directory: %w", err)
-	}
-
+	// Object key mirrors the old local-disk path structure, just as a
+	// MinIO object name instead of a filesystem path.
 	filename := uuid.NewString() + ext
-	destPath := filepath.Join(messageUploadDir, filename)
+	objectKey := "users/" + callerID + "/messages/" + messageID + "/" + filename
 
-	dst, err := os.Create(destPath)
-	if err != nil {
-		return att, fmt.Errorf("failed to create destination file for %s: %w", header.Filename, err)
-	}
-	defer dst.Close()
-
-	// Stream file to disk in custom-sized chunks — no manual loop needed,
-	// io.CopyBuffer already does this internally, without per-chunk overhead.
-	buf := make([]byte, copyBufferSize)
-	written, err := io.CopyBuffer(dst, src, buf)
-	if err != nil {
-		_ = os.Remove(destPath)
-		return att, fmt.Errorf("failed to save %s: %w", header.Filename, err)
-	}
-
-	fileURL := "http://localhost:8000/uploads/users/" + callerID + "/messages/" + messageID + "/" + filename
-	attType := attachmentTypeFromExt(ext)
 	mimeType := header.Header.Get("Content-Type")
 
-	att, err = s.attachments.Create(ctx, messageID, attType, fileURL, header.Filename, mimeType, written)
+	// Stream straight from the multipart body to MinIO — no temp file,
+	// no local disk write at all.
+	if err := s.storage.UploadStream(ctx, objectKey, src, header.Size, mimeType); err != nil {
+		return att, fmt.Errorf("failed to upload %s: %w", header.Filename, err)
+	}
+
+	fileURL, err := s.storage.GetPresignedURL(ctx, objectKey, presignedURLTTL)
 	if err != nil {
-		_ = os.Remove(destPath)
+		// Upload succeeded but we couldn't get a link back — clean up
+		// the orphaned object rather than leaving it unreferenced.
+		_ = s.storage.Delete(ctx, objectKey)
+		return att, fmt.Errorf("failed to generate download link for %s: %w", header.Filename, err)
+	}
+
+	attType := attachmentTypeFromExt(ext)
+
+	att, err = s.attachments.Create(ctx, messageID, attType, fileURL, header.Filename, mimeType, header.Size)
+	if err != nil {
+		_ = s.storage.Delete(ctx, objectKey)
 		return att, fmt.Errorf("failed to save attachment record for %s: %w", header.Filename, err)
 	}
 

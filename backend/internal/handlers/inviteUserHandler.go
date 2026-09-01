@@ -61,8 +61,6 @@ func (h *InviteHandler) SendInvite(c *gin.Context) {
 }
 
 // ValidateInvite lets the signup page check a ?invite=... token before
-// rendering the form (e.g. to prefill and lock the email field). Public
-// — no auth required, since the invitee isn't logged in yet.
 func (h *InviteHandler) ValidateInvite(c *gin.Context) {
 	token := c.Query("token")
 	if token == "" {
