@@ -1,6 +1,8 @@
 package main
 
 import (
+	"golang-jwt-project/internal/middleware"
+	"golang.org/x/time/rate"
 	"log"
 
 	"golang-jwt-project/database/config"
@@ -12,10 +14,6 @@ import (
 )
 
 func main() {
-	// Load .env into the process's environment variables (SMTP_FROM,
-	// SMTP_APP_PASSWORD, SMTP_HOST, SMTP_PORT, etc). If no .env file is
-	// found (e.g. in production where real env vars are set directly),
-	// this just logs and continues rather than failing.
 	if err := godotenv.Load(); err != nil {
 		log.Println("no .env file found, relying on system environment variables")
 	}
@@ -37,7 +35,12 @@ func main() {
 	pool := ws.NewPool()
 	go pool.Start()
 
-	router := api.NewRouter(db, pool, jwtSecret, refreshSecret)
+	globalLimiter := middleware.NewRateLimiter(rate.Limit(20), 40)
+	authLimiter := middleware.NewRateLimiter(rate.Limit(0.5), 3)
+	defer globalLimiter.Close()
+	defer authLimiter.Close()
+
+	router := api.NewRouter(db, pool, jwtSecret, refreshSecret, globalLimiter, authLimiter)
 	if err := router.Run(":8000"); err != nil {
 		log.Fatalf("server failed: %v", err)
 	}

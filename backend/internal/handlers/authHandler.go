@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"errors"
+	"golang-jwt-project/internal/middleware"
 	"golang-jwt-project/internal/utils"
 	"log"
 	"net/http"
@@ -23,13 +24,13 @@ func NewAuthHandler(service *services.AuthService, inviteService *services.Invit
 }
 
 // RegisterRoutes wires up the auth routes
-func (h *AuthHandler) RegisterRoutes(router *gin.RouterGroup) {
-	router.POST("/login", h.Login)
-	router.POST("/signup", h.Signup)
-	router.POST("/refresh", h.Refresh)
+func (h *AuthHandler) RegisterRoutes(router *gin.RouterGroup, authLimiter *middleware.RateLimiter) {
+	router.POST("/login", authLimiter.Middleware(), h.Login)
+	router.POST("/signup", authLimiter.Middleware(), h.Signup)
+	router.POST("/refresh", authLimiter.Middleware(), h.Refresh)
 	router.POST("/logout", h.Logout)
-	router.POST("/forgot-password", h.ForgotPassword)
-	router.POST("/reset-password", h.ResetPassword)
+	router.POST("/forgot-password", authLimiter.Middleware(), h.ForgotPassword)
+	router.POST("/reset-password", authLimiter.Middleware(), h.ResetPassword)
 }
 
 func (h *AuthHandler) Login(c *gin.Context) {
@@ -41,18 +42,21 @@ func (h *AuthHandler) Login(c *gin.Context) {
 
 	user, pair, err := h.service.Login(c.Request.Context(), req.Username, req.Password)
 	if err != nil {
-		if errors.Is(err, utils.ErrInvalidCredentials) {
+		switch {
+		case errors.Is(err, utils.ErrAccountLocked):
+			c.JSON(http.StatusLocked, gin.H{"message": "account temporarily locked due to repeated failed login attempts"})
+			return
+		case errors.Is(err, utils.ErrInvalidCredentials):
 			c.JSON(http.StatusUnauthorized, gin.H{"message": "invalid credentials"})
 			return
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
-		return
 	}
 
-	// ADDED — best-effort, never blocks the response even if it fails.
 	go h.service.CompleteLoginWithDeviceTracking(
 		context.Background(),
-		// this keeps running after the response is already sent
 		user.ID, pair.RefreshToken,
 		c.Request.UserAgent(), c.ClientIP(), user.Email,
 	)

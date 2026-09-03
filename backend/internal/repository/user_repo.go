@@ -76,9 +76,6 @@ func (r *UserRepository) GetAll(ctx context.Context) ([]models.UserResponse, err
 	return users, nil
 }
 
-// Update applies a partial update to the user with the given id. Any nil
-// field is left unchanged (COALESCE against the existing column). Returns
-// nil, nil if no user with that id exists.
 func (r *UserRepository) Update(ctx context.Context, id string, username, email, passwordHash, role *string) (*models.UserResponse, error) {
 	var u models.UserResponse
 	err := r.db.QueryRowContext(

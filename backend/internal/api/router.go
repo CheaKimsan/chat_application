@@ -43,7 +43,7 @@ func handleImage() gin.HandlerFunc {
 	}
 }
 
-func NewRouter(db *sql.DB, pool *ws.Pool, jwtSecret []byte, refreshSecret []byte) *gin.Engine {
+func NewRouter(db *sql.DB, pool *ws.Pool, jwtSecret []byte, refreshSecret []byte, globalLimiter, authLimiter *middleware.RateLimiter) *gin.Engine {
 	router := gin.Default()
 
 	uploadsDir, err := filepath.Abs(filepath.Join("..", "..", "uploads"))
@@ -57,6 +57,7 @@ func NewRouter(db *sql.DB, pool *ws.Pool, jwtSecret []byte, refreshSecret []byte
 	corsConfig.AllowMethods = []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"}
 	router.Use(cors.New(corsConfig))
 	router.Use(Logger())
+	router.Use(globalLimiter.Middleware())
 
 	cryptoKey, err := base64.StdEncoding.DecodeString("wZ8KkUKjXlzw18cPeu7Tbj+4F8e8RmiSK8K5YihaxtA=")
 	if err != nil || len(cryptoKey) != 32 {
@@ -68,13 +69,7 @@ func NewRouter(db *sql.DB, pool *ws.Pool, jwtSecret []byte, refreshSecret []byte
 	refreshRepo := repository.NewRefreshTokenRepository(db)
 	passwordResetRepo := repository.NewPasswordResetRepository(db)
 	tokenService := services.NewTokenService(jwtSecret, refreshSecret)
-
-	// SMTP creds come from env vars — never hardcode these in source.
-	// Set them in a .env file (gitignored) or your shell/deploy config:
-	//   SMTP_FROM=youraddress@gmail.com
-	//   SMTP_APP_PASSWORD=your-16-char-app-password   (Gmail App Password, NOT your login password)
-	//   SMTP_HOST=smtp.gmail.com
-	//   SMTP_PORT=587
+	//email sent to invite user
 	smtpFrom := os.Getenv("SMTP_FROM")
 	smtpAppPassword := os.Getenv("SMTP_APP_PASSWORD")
 	smtpHost := os.Getenv("SMTP_HOST")
@@ -117,7 +112,7 @@ func NewRouter(db *sql.DB, pool *ws.Pool, jwtSecret []byte, refreshSecret []byte
 
 	api := router.Group("/api/v1")
 	{
-		authHandler.RegisterRoutes(api)
+		authHandler.RegisterRoutes(api, authLimiter)
 
 		users := api.Group("/users")
 		users.Use(middleware.AuthMiddleware(jwtSecret))

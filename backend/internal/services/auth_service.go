@@ -51,6 +51,11 @@ func NewAuthService(
 	}
 }
 
+const (
+	maxFailedAttempts = 5
+	lockDuration      = 15 * time.Minute
+)
+
 func (s *AuthService) issueTokenPair(ctx context.Context, u models.UserResponse) (TokenPair, error) {
 	access, err := s.tokens.GenerateAccessToken(u)
 	if err != nil {

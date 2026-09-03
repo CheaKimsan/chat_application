@@ -10,4 +10,5 @@ var (
 	ErrRefreshTokenRevoked   = errors.New("refresh token revoked or expired")
 	ErrUserNotFound          = errors.New("user no longer exists")
 	ErrForbidden             = errors.New("not authorized to perform this action")
+	ErrAccountLocked         = errors.New("account temporarily locked")
 )
