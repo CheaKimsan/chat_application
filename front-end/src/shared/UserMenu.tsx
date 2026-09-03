@@ -1,9 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
-    UserRoundPlus,
-    UserCog,
     LogOut,
-    Plus,
     Camera,
 } from 'lucide-react';
 import InviteButton from './Invitebutton';
@@ -154,14 +151,15 @@ export default function UserMenu({ username, email, onLogout }: UserMenuProps) {
                                 width: 72,
                                 height: 72,
                                 borderRadius: '50%',
-                                background: 'linear-gradient(135deg, #4a5ef4, #8763ff)',
                                 border: '3px solid rgba(255,255,255,0.15)',
                                 display: 'flex',
                                 alignItems: 'center',
                                 justifyContent: 'center',
                                 overflow: 'hidden',
                                 marginBottom: 12,
+                                cursor: 'pointer',
                             }}
+                            onClick={() => fileInputRef.current?.click()}
                         >
                             {profilePhoto ? (
                                 <img
@@ -177,7 +175,6 @@ export default function UserMenu({ username, email, onLogout }: UserMenuProps) {
 
                             <button
                                 type="button"
-                                onClick={() => fileInputRef.current?.click()}
                                 aria-label="Upload profile photo"
                                 style={{
                                     position: 'absolute',
@@ -237,26 +234,6 @@ export default function UserMenu({ username, email, onLogout }: UserMenuProps) {
                         >
                             Setting Application
                         </div>
-
-                        <button
-                            type="button"
-                            onClick={() => fileInputRef.current?.click()}
-                            style={{
-                                width: '100%',
-                                border: 'none',
-                                background: 'transparent',
-                                color: '#eef2f7',
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: 10,
-                                padding: '10px 16px',
-                                cursor: 'pointer',
-                                textAlign: 'left',
-                            }}
-                        >
-                            <Camera size={18} color="#d9e0ee" />
-                            <span style={{ fontSize: 14 }}>Update profile photo</span>
-                        </button>
 
                         <InviteButton />
 

@@ -1,8 +1,8 @@
-import {MessageResponse, SendMessageRequest} from "./model";
-import {apiClient} from "../../../api/apiClient";
-import {getSharedKey, hasSharedKey, waitForSharedKey} from "../../../socket/keyExchange";
-import {sendKeyExchangeRequest} from "../../../socket/socketClient";
-import {decryptMessage, encryptMessage} from "../../../socket/crypto";
+import { MessageResponse, SendMessageRequest } from "./model";
+import { apiClient } from "../../../api/apiClient";
+import { getSharedKey, hasSharedKey, waitForSharedKey } from "../../../socket/keyExchange";
+import { sendKeyExchangeRequest } from "../../../socket/socketClient";
+import { decryptMessage, encryptMessage } from "../../../socket/crypto";
 
 interface GetMessagesResponse {
     messages: MessageResponse[];
@@ -27,8 +27,12 @@ export const reqGetMessages = async (contactId: string | number): Promise<Messag
 
     const decrypted = await Promise.all(
         rawMessages.map(async (m) => {
-            if (!m.body || !m.nonce) {
+            if (!m.body) {
                 return { ...m, body: "" };
+            }
+
+            if (!m.nonce) {
+                return m;
             }
 
             if (!sharedKey) {
@@ -39,7 +43,7 @@ export const reqGetMessages = async (contactId: string | number): Promise<Messag
                 const plaintext = await decryptMessage(sharedKey, m.body, m.nonce);
                 return { ...m, body: plaintext };
             } catch (err) {
-                return { ...m, body: "[unable to decrypt]" };
+                return { ...m, body: "[message end to end encrypted]" };
             }
         })
     );
@@ -50,6 +54,16 @@ export const reqGetMessages = async (contactId: string | number): Promise<Messag
 export const reqSendMessage = async (
     data: SendMessageRequest
 ): Promise<MessageResponse> => {
+    if (data.encrypted === false) {
+        const response = await apiClient.post<{ message?: MessageResponse; data?: MessageResponse }>(
+            "/messages/send",
+            { to_user: data.to_user, ciphertext: data.body ?? "", nonce: null }
+        );
+
+        const msg = response.data.message ?? response.data.data ?? (response.data as unknown as MessageResponse);
+        return { ...msg, body: data.body ?? "" };
+    }
+
     const sharedKey = await waitForSharedKey(data.to_user, () =>
         sendKeyExchangeRequest(data.to_user)
     );

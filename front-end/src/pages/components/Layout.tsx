@@ -9,7 +9,7 @@ import { connectSocket, disconnectSocket, sendTyping } from '../../socket/socket
 import UserMenu from "../../shared/UserMenu";
 import { UserResponse } from "../../components/user/core/model";
 import { reqSendMessage, reqUploadFile } from "../../components/message/core/request";
-import { Paperclip, Send } from 'lucide-react';
+import { Lock, MessageCircle, Paperclip, Send } from 'lucide-react';
 
 
 export default function Layout() {
@@ -61,6 +61,7 @@ export default function Layout() {
     const isTyping = selectedContact ? typingUsers.has(String(selectedContact.id)) : false;
 
     const [outletInput, setOutletInput] = useState('');
+    const [isEncrypted, setIsEncrypted] = useState(true);
     const [isUploading, setIsUploading] = useState(false);
     const [uploadProgress, setUploadProgress] = useState(0);
     const [uploadedBytes, setUploadedBytes] = useState(0);
@@ -126,6 +127,7 @@ export default function Layout() {
         sendMutation.mutate({
             to_user: String(selectedContact.id),
             body: trimmed,
+            encrypted: isEncrypted,
         });
         setOutletInput('');
     };
@@ -188,7 +190,7 @@ export default function Layout() {
             <Sidebar onSelectContact={handleSelectContact} />
 
             <main style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, height: '100vh', overflow: 'hidden' }}>
-                <ChatHeader contact={contact} isTyping={isTyping} />
+                {selectedContact && <ChatHeader contact={contact} isTyping={isTyping} />}
 
                 <div
                     style={{
@@ -227,79 +229,107 @@ export default function Layout() {
                         }} />
                     </div>
 
-                    <form
-                        onSubmit={(e) => {
-                            e.preventDefault();
-                            handleSend();
-                        }}
-                        style={{ display: 'flex', gap: 8, padding: 12, borderTop: '1px solid #161719', background: '#070809' }}
-                    >
-                        <input
-                            ref={fileInputRef}
-                            type="file"
-                            hidden
-                            multiple
-                            onChange={handleFileSelect}
-                            accept="image/*,.pdf,.txt,.mp4"
-                        />
-
-                        <button
-                            type="button"
-                            onClick={() => fileInputRef.current?.click()}
-                            disabled={!selectedContact || isUploading}
-                            style={{
-                                padding: '10px 14px',
-                                borderRadius: 6,
-                                border: '1px solid #2A2D32',
-                                background: '#101317',
-                                color: '#E7E3DA',
-                                cursor: selectedContact && !isUploading ? 'pointer' : 'not-allowed',
-                                fontWeight: 600,
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: 6,
-                                opacity: isUploading ? 0.7 : 1,
+                    {selectedContact && (
+                        <form
+                            onSubmit={(e) => {
+                                e.preventDefault();
+                                handleSend();
                             }}
+                            style={{ display: 'flex', gap: 8, padding: 12, borderTop: '1px solid #161719', background: '#070809' }}
                         >
-                            {isUploading ? (
-                                <>
-                                    <div style={{
-                                        width: 14,
-                                        height: 14,
-                                        border: '2px solid #666',
-                                        borderTop: '2px solid #4F46E5',
-                                        borderRadius: '50%',
-                                        animation: 'spin 0.8s linear infinite',
-                                    }} />
-                                    Uploading...
-                                </>
-                            ) : <Paperclip size={16} />}
-                        </button>
 
-                        <input
-                            type="text"
-                            value={outletInput}
-                            onChange={handleInputChange}
-                            placeholder="Type here..."
-                            disabled={!selectedContact}
-                            style={{ flex: 1, padding: 10, borderRadius: 6, border: '1px solid #222', background: '#0B0C0D', color: '#fff' }}
-                        />
-                        <button
-                            type="submit"
-                            disabled={!outletInput.trim() || !selectedContact || sendMutation.isPending}
-                            style={{
-                                padding: '10px 16px',
-                                borderRadius: 6,
-                                border: 'none',
-                                background: outletInput.trim() && selectedContact ? '#4F46E5' : '#2A2D32',
-                                color: '#fff',
-                                cursor: outletInput.trim() && selectedContact ? 'pointer' : 'not-allowed',
-                                fontWeight: 600,
-                            }}
-                        >
-                            {sendMutation.isPending ? 'Sending...' : <Send size={16} />}
-                        </button>
-                    </form>
+                            <button
+                                type="button"
+                                onClick={() => setIsEncrypted(!isEncrypted)}
+                                disabled={!selectedContact || sendMutation.isPending}
+                                title={isEncrypted ? 'Encrypted chat' : 'Normal chat'}
+                                style={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    width: 40,
+                                    height: 40,
+                                    borderRadius: 6,
+                                    border: '1px solid #2A2D32',
+                                    background: '#101317',
+                                    color: '#E7E3DA',
+                                    cursor: selectedContact ? 'pointer' : 'not-allowed',
+                                }}
+                            >
+                                {isEncrypted ? (
+                                    <Lock size={18} />
+                                ) : (
+                                    <MessageCircle size={18} />
+                                )}
+                            </button>
+
+                            <input
+                                ref={fileInputRef}
+                                type="file"
+                                hidden
+                                multiple
+                                onChange={handleFileSelect}
+                                accept="image/*,.pdf,.txt,.mp4"
+                            />
+
+                            <button
+                                type="button"
+                                onClick={() => fileInputRef.current?.click()}
+                                disabled={!selectedContact || isUploading}
+                                style={{
+                                    padding: '10px 14px',
+                                    borderRadius: 6,
+                                    border: '1px solid #2A2D32',
+                                    background: '#101317',
+                                    color: '#E7E3DA',
+                                    cursor: selectedContact && !isUploading ? 'pointer' : 'not-allowed',
+                                    fontWeight: 600,
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: 6,
+                                    opacity: isUploading ? 0.7 : 1,
+                                }}
+                            >
+                                {isUploading ? (
+                                    <>
+                                        <div style={{
+                                            width: 14,
+                                            height: 14,
+                                            border: '2px solid #666',
+                                            borderTop: '2px solid #4F46E5',
+                                            borderRadius: '50%',
+                                            animation: 'spin 0.8s linear infinite',
+                                        }} />
+                                        Uploading...
+                                    </>
+                                ) : <Paperclip size={16} />}
+                            </button>
+
+                            <input
+                                type="text"
+                                value={outletInput}
+                                onChange={handleInputChange}
+                                placeholder="Type here..."
+                                disabled={!selectedContact}
+                                style={{ flex: 1, padding: 10, borderRadius: 6, border: '1px solid #222', background: '#0B0C0D', color: '#fff' }}
+                            />
+                            <button
+                                type="submit"
+                                disabled={!outletInput.trim() || !selectedContact || sendMutation.isPending}
+                                style={{
+                                    padding: '10px 16px',
+                                    borderRadius: 6,
+                                    border: 'none',
+                                    background: outletInput.trim() && selectedContact ? '#4F46E5' : '#2A2D32',
+                                    color: '#fff',
+                                    cursor: outletInput.trim() && selectedContact ? 'pointer' : 'not-allowed',
+                                    fontWeight: 600,
+                                }}
+                            >
+                                {sendMutation.isPending ? 'Sending...' : <Send size={16} />}
+                            </button>
+                        </form>
+                    )}
                 </div>
             </main>
         </div>

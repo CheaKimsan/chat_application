@@ -1,4 +1,4 @@
- interface AttachmentResponse {
+interface AttachmentResponse {
     id: string;
     message_id: string;
     type: string;
@@ -22,6 +22,7 @@ interface MessageResponse {
 interface SendMessageRequest {
     to_user: string;
     body?: string;
+    encrypted?: boolean;
 }
 
 export type {

@@ -149,15 +149,7 @@ export default function ChatHeader({
                             <TypingDots />
                             typing…
                         </span>
-                    ) : (
-                        <>
-                            <span style={{ fontFamily: "'IBM Plex Mono', monospace" }}>CH {display?.freq ?? '--'}</span>
-                            <span>·</span>
-                            <span style={{ color: display?.online ? COLORS.teal : COLORS.faint }}>
-                                {display?.online ? 'on channel' : 'off channel'}
-                            </span>
-                        </>
-                    )}
+                    ) : null}
                 </div>
             </div>
         </div>

@@ -3,10 +3,10 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useOutletContext } from "react-router-dom";
 import { useAuthStore } from "../../store/auth.store";
 import { sendMarkRead } from "../../socket/socketClient";
-import {UserResponse} from "../../components/user/core/model";
-import {LoadingSpinner} from "../../shared/LoadingSpinner";
-import {MessageResponse} from "../../components/message/core/model";
-import {reqGetMessages} from "../../components/message/core/request";
+import { UserResponse } from "../../components/user/core/model";
+import { LoadingSpinner } from "../../shared/LoadingSpinner";
+import { MessageResponse } from "../../components/message/core/model";
+import { reqGetMessages } from "../../components/message/core/request";
 
 export default function ChatWindow() {
     const { selectedContact, isUploading, uploadProgress, uploadedBytes, uploadTotalBytes } = useOutletContext<{
@@ -145,7 +145,6 @@ export default function ChatWindow() {
         return () => window.removeEventListener("chat:message_read", handleMessageRead);
     }, [queryClient, selectedContact?.id]);
 
-    if (!selectedContact) return <div>Select a contact to start chatting</div>;
     if (isLoading) return <div>Loading messages…</div>;
     if (error) return <div>Failed to load messages</div>;
 
@@ -273,12 +272,6 @@ export default function ChatWindow() {
                     </div>
                 );
             })}
-
-            {isContactTyping && (
-                <div className="text-gray-400" style={{ fontSize: 13, fontStyle: "italic" }}>
-                    {selectedContact.username} is typing…
-                </div>
-            )}
 
             {isUploading && <LoadingSpinner progress={uploadProgress} loaded={uploadedBytes} total={uploadTotalBytes} />}
         </div>

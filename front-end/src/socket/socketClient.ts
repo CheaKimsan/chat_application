@@ -82,9 +82,9 @@ export const connectSocket = async (token?: string) => {
         if (payload.type === "new_message") {
             const msg = payload.message;
 
-            // Attachment-only messages have no encrypted text body — nothing to decrypt.
+            // Plain messages have no nonce; attachment-only messages have no body.
             if (!msg.body || !msg.nonce) {
-                emitChatEvent("chat:new_message", { ...msg, plaintext: "" });
+                emitChatEvent("chat:new_message", { ...msg, plaintext: msg.body || "" });
                 return;
             }
 

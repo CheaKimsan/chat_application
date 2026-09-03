@@ -3,7 +3,7 @@ import { useAuthStore } from "../../store/auth.store";
 import { useQuery } from "@tanstack/react-query";
 import { UserResponse } from "../../components/user/core/model";
 import { reqGetUsers } from "../../components/user/core/request";
-import { ContactRound } from "lucide-react";
+import { Contact2, Search } from "lucide-react";
 
 const C = {
     bg: "#0F1113",
@@ -15,12 +15,6 @@ const C = {
     accentDim: "rgba(79, 169, 160, 0.12)",
 };
 
-type ItemId = "contacts";
-
-const items: { id: ItemId; label: string }[] = [
-    { id: "contacts", label: "Contacts" },
-];
-
 type SidebarProps = {
     onSelectContact?: (user: UserResponse) => void;
 };
@@ -30,27 +24,6 @@ type TypingPayload = {
     to_user: string;
     is_typing: boolean;
 };
-
-// type PresenceState = "online" | "away" | "offline";
-
-// function getPresenceMeta(id?: string | number) {
-//     const seed = typeof id === "undefined" ? 0 : String(id)
-//         .split("")
-//         .reduce((sum, ch) => sum + ch.charCodeAt(0), 0);
-//
-//     const state: PresenceState = seed % 5 === 0 ? "offline" : seed % 3 === 0 ? "away" : "online";
-//
-//     const label =
-//         state === "online"
-//             ? "Online"
-//             : state === "away"
-//                 ? `Last active ${((seed % 8) + 2).toString()}m ago`
-//                 : `Offline since ${(seed % 12) + 2}h ago`;
-//
-//     const color = state === "online" ? C.accent : state === "away" ? "#FBBF24" : "#8B92A0";
-//
-//     return { state, label, color };
-// }
 
 function useTypingUsers(currentUserId: string | number | undefined) {
     const [typingUsers, setTypingUsers] = useState<Set<string>>(new Set());
@@ -122,8 +95,8 @@ function usePresenceUsers() {
 
 export default function Sidebar({ onSelectContact }: SidebarProps) {
     const user = useAuthStore((s) => s.user);
-    const [active, setActive] = useState<ItemId>("contacts");
     const [selectedUserId, setSelectedUserId] = useState<string | number | null>(null);
+    const [search, setSearch] = useState("");
     const onlineUsers = usePresenceUsers();
 
     const {
@@ -137,13 +110,10 @@ export default function Sidebar({ onSelectContact }: SidebarProps) {
 
     const typingUsers = useTypingUsers(user?.id);
 
-    const myPresence = {
-        label: user ? (onlineUsers.has(String(user.id)) ? "Online" : "Offline") : "Not signed in",
-        color: user ? (onlineUsers.has(String(user.id)) ? C.accent : C.muted) : C.muted,
-    };
 
     const contactRows = users
         .filter((u) => u.id !== user?.id)
+        .filter((u) => `${u.username} ${u.email}`.toLowerCase().includes(search.toLowerCase()))
         .map((u) => ({
             primary: u.username,
             secondary: u.email,
@@ -163,171 +133,11 @@ export default function Sidebar({ onSelectContact }: SidebarProps) {
 
     return (
         <div style={{ display: "flex", height: "100vh", overflow: "hidden" }}>
-            <aside
-                style={{
-                    width: 260,
-                    minWidth: 200,
-                    background: C.bg,
-                    borderRight: `1px solid ${C.border}`,
-                    color: C.text,
-                    display: "flex",
-                    flexDirection: "column",
-                    height: "100vh",
-                    overflow: "hidden",
-                    position: "sticky",
-                    top: 0,
-                    left: 0,
-                }}
-            >
-                <div style={{ padding: "14px 12px", borderBottom: `1px solid ${C.border}` }}>
-                    <div
-                        style={{
-                            display: "flex",
-                            alignItems: "center",
-                            gap: 10,
-                            padding: "10px 8px",
-                            borderRadius: 10,
-                            background: "#171B1E",
-                            border: `1px solid ${C.border}`,
-                        }}
-                    >
-                        <span
-                            style={{
-                                width: 38,
-                                height: 38,
-                                flexShrink: 0,
-                                borderRadius: 10,
-                                background: "#20242A",
-                                border: `1px solid ${C.border}`,
-                                display: "inline-flex",
-                                alignItems: "center",
-                                justifyContent: "center",
-                                overflow: "hidden",
-                                color: C.muted,
-                                fontSize: 12,
-                                fontWeight: 700,
-                            }}
-                        >
-                            {user?.profile_photo ? (
-                                <img
-                                    src={user.profile_photo}
-                                    alt=""
-                                    style={{ width: "100%", height: "100%", objectFit: "cover" }}
-                                />
-                            ) : (
-                                (user?.username ?? "Guest")
-                                    .split(" ")
-                                    .map((part) => part[0]?.toUpperCase())
-                                    .join("")
-                                    .slice(0, 2)
-                            )}
-                        </span>
-
-                        <span style={{ minWidth: 0, display: "flex", flexDirection: "column", gap: 3 }}>
-                            <span
-                                style={{
-                                    color: C.text,
-                                    fontSize: 13,
-                                    fontWeight: 700,
-                                    fontFamily: "'Space Grotesk', sans-serif",
-                                    overflow: "hidden",
-                                    textOverflow: "ellipsis",
-                                    whiteSpace: "nowrap",
-                                }}
-                            >
-                                {user?.username ?? "Guest"}
-                            </span>
-                            <span
-                                style={{
-                                    color: C.muted,
-                                    fontSize: 11,
-                                    overflow: "hidden",
-                                    textOverflow: "ellipsis",
-                                    whiteSpace: "nowrap",
-                                }}
-                            >
-                                {user?.email ?? "Not signed in"}
-                            </span>
-                            <span style={{ display: "flex", alignItems: "center", gap: 5, color: myPresence.color, fontSize: 11 }}>
-                                <span
-                                    style={{
-                                        width: 6,
-                                        height: 6,
-                                        borderRadius: "50%",
-                                        background: myPresence.color,
-                                    }}
-                                />
-                                {user ? myPresence.label : "Not signed in"}
-                            </span>
-                        </span>
-                    </div>
-                </div>
-
-                <nav style={{ padding: 12, display: "flex", flexDirection: "column", gap: 6 }}>
-                    {items.map((it) => {
-                        const isActive = it.id === active;
-                        return (
-                            <button
-                                key={it.id}
-                                onClick={() => setActive(it.id)}
-                                style={{
-                                    display: "flex",
-                                    alignItems: "center",
-                                    gap: 10,
-                                    padding: "10px 12px",
-                                    borderRadius: 8,
-                                    background: isActive ? C.accentDim : "transparent",
-                                    color: isActive ? C.text : C.text,
-                                    border: "none",
-                                    textAlign: "left",
-                                    cursor: "pointer",
-                                }}
-                                aria-label={it.label}
-                                aria-current={isActive}
-                            >
-                                <span
-                                    style={{
-                                        width: 34,
-                                        height: 34,
-                                        borderRadius: 8,
-                                        background: isActive ? C.accent : "#151718",
-                                        display: "inline-flex",
-                                        alignItems: "center",
-                                        justifyContent: "center",
-                                        color: isActive ? "#0F1113" : C.muted,
-                                        fontSize: 12,
-                                        fontWeight: 700,
-                                        transition: "background 120ms ease, color 120ms ease",
-                                    }}
-                                >
-                                    <ContactRound size={18} strokeWidth={1.8} />
-                                </span>
-                                <span style={{ fontSize: 13, fontWeight: isActive ? 600 : 400 }}>{it.label}</span>
-                            </button>
-                        );
-                    })}
-                </nav>
-
-                <div style={{ marginTop: "auto", padding: 12, borderTop: `1px solid ${C.border}` }}>
-                    <div style={{ fontSize: 12, color: C.muted }}>Status</div>
-                    <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 8 }}>
-                        <span
-                            style={{
-                                width: 10,
-                                height: 10,
-                                borderRadius: "50%",
-                                background: user ? myPresence.color : C.muted,
-                            }}
-                        />
-                        <div style={{ fontSize: 13 }}>{user ? myPresence.label : "Not signed in"}</div>
-                    </div>
-                </div>
-            </aside>
 
             <section
                 style={{
-                    width: 280,
-                    minWidth: 220,
+                    width: 300,
+                    minWidth: 240,
                     background: C.subBg,
                     borderRight: `1px solid ${C.border}`,
                     color: C.text,
@@ -339,30 +149,62 @@ export default function Sidebar({ onSelectContact }: SidebarProps) {
                     top: 0,
                 }}
             >
-                <div style={{ padding: "18px 16px", borderBottom: `1px solid ${C.border}` }}>
-                    <div style={{ fontWeight: 700, fontFamily: "'Space Grotesk', sans-serif", fontSize: 15 }}>
-                        {title}
+                <div style={{ padding: "18px 16px 14px", borderBottom: `1px solid ${C.border}` }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+                        <div style={{ fontWeight: 700, fontFamily: "'Space Grotesk', sans-serif", fontSize: 15, display: "flex", alignItems: "center", gap: 4 }}>
+                            <Contact2 size={22} />
+                            {title}
+                        </div>
+                        <span style={{ color: C.muted, fontSize: 11 }}>{rows.length}</span>
                     </div>
+                    <label
+                        style={{
+                            height: 34,
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 8,
+                            padding: "0 10px",
+                            borderRadius: 8,
+                            background: "#0F1113",
+                            border: `1px solid ${C.border}`,
+                            color: C.muted,
+                        }}
+                    >
+                        <Search size={15} />
+                        <input
+                            value={search}
+                            onChange={(e) => setSearch(e.target.value)}
+                            placeholder="Search contacts"
+                            aria-label="Search contacts"
+                            style={{
+                                width: "100%",
+                                border: "none",
+                                outline: "none",
+                                background: "transparent",
+                                color: C.text,
+                                fontSize: 12,
+                            }}
+                        />
+                    </label>
                 </div>
 
                 <div style={{ flex: 1, overflowY: "auto", padding: 8 }}>
-                    {active === "contacts" && isLoading ? (
+                    {isLoading ? (
                         <div style={{ padding: 12, fontSize: 13, color: C.muted }}>Loading contacts…</div>
-                    ) : active === "contacts" && error ? (
+                    ) : error ? (
                         <div style={{ padding: 12, fontSize: 13, color: "#E27D7D" }}>Failed to load contacts</div>
-                    ) : rows.length === 0 && active === "contacts" ? (
+                    ) : rows.length === 0 ? (
                         <div style={{ padding: 12, fontSize: 13, color: C.muted }}>No contacts found</div>
                     ) : (
                         rows.map((row, i) => {
-                            const isSelected =
-                                active === "contacts" && row.user?.id === selectedUserId;
+                            const isSelected = row.user?.id === selectedUserId;
                             const isTyping = row.user ? typingUsers.has(String(row.user.id)) : false;
 
                             return (
                                 <button
                                     key={row.user?.id ?? i}
                                     onClick={() => {
-                                        if (active === "contacts" && row.user) {
+                                        if (row.user) {
                                             handleSelectContact(row.user);
                                         }
                                     }}
@@ -371,7 +213,7 @@ export default function Sidebar({ onSelectContact }: SidebarProps) {
                                         display: "flex",
                                         alignItems: "center",
                                         gap: 10,
-                                        padding: "10px 12px",
+                                        padding: "9px 10px",
                                         borderRadius: 8,
                                         background: isSelected ? C.accentDim : "transparent",
                                         border: "none",
@@ -441,7 +283,7 @@ export default function Sidebar({ onSelectContact }: SidebarProps) {
                         })
                     )}
                 </div>
-            </section>
-        </div>
+            </section >
+        </div >
     );
 }
