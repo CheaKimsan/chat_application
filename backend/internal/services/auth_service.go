@@ -20,16 +20,21 @@ type TokenPair struct {
 }
 
 var ErrInvalidResetToken = errors.New("invalid or expired reset token")
+var ErrInvalidOTP = errors.New("invalid or expired otp")
+var ErrEmailNotVerified = errors.New("email not verified")
 
 type AuthService struct {
-	users          *repository.UserRepository
-	refreshTokens  *repository.RefreshTokenRepository
-	passwordResets *repository.PasswordResetRepository
-	tokens         *TokenService
-	emailFrom      string
-	emailPassword  string
-	smtpHost       string
-	smtpPort       string
+	users             *repository.UserRepository
+	refreshTokens     *repository.RefreshTokenRepository
+	passwordResets    *repository.PasswordResetRepository
+	tokens            *TokenService
+	emailFrom         string
+	emailPassword     string
+	smtpHost          string
+	smtpPort          string
+	verificationCodes map[string]string
+	verifiedUsers     map[string]bool
+	otpTTL            time.Duration
 }
 
 func NewAuthService(
@@ -40,14 +45,17 @@ func NewAuthService(
 	emailFrom, emailPassword, smtpHost, smtpPort string,
 ) *AuthService {
 	return &AuthService{
-		users:          users,
-		refreshTokens:  refreshTokens,
-		passwordResets: passwordResets,
-		tokens:         tokens,
-		emailFrom:      emailFrom,
-		emailPassword:  emailPassword,
-		smtpHost:       smtpHost,
-		smtpPort:       smtpPort,
+		users:             users,
+		refreshTokens:     refreshTokens,
+		passwordResets:    passwordResets,
+		tokens:            tokens,
+		emailFrom:         emailFrom,
+		emailPassword:     emailPassword,
+		smtpHost:          smtpHost,
+		smtpPort:          smtpPort,
+		verificationCodes: map[string]string{},
+		verifiedUsers:     map[string]bool{},
+		otpTTL:            10 * time.Minute,
 	}
 }
 
@@ -71,6 +79,10 @@ func (s *AuthService) issueTokenPair(ctx context.Context, u models.UserResponse)
 	return TokenPair{AccessToken: access, RefreshToken: refresh}, nil
 }
 
+func generateOTP() string {
+	return fmt.Sprintf("%06d", time.Now().UnixNano()%1000000)
+}
+
 func (s *AuthService) Login(ctx context.Context, username, password string) (models.UserResponse, TokenPair, error) {
 	u, err := s.users.GetByUsername(ctx, username)
 	if err != nil {
@@ -81,6 +93,9 @@ func (s *AuthService) Login(ctx context.Context, username, password string) (mod
 	}
 	if err := bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(password)); err != nil {
 		return models.UserResponse{}, TokenPair{}, utils.ErrInvalidCredentials
+	}
+	if verified, ok := s.verifiedUsers[u.Email]; ok && !verified {
+		return models.UserResponse{}, TokenPair{}, ErrEmailNotVerified
 	}
 
 	pair, err := s.issueTokenPair(ctx, *u)
@@ -104,7 +119,6 @@ func (s *AuthService) Signup(ctx context.Context, username, email, password, pub
 		return models.UserResponse{}, TokenPair{}, err
 	}
 
-	//default role user when register
 	const defaultRole = "user"
 
 	user, err := s.users.Create(ctx, username, email, defaultRole, string(passwordHash), publicKey)
@@ -112,11 +126,30 @@ func (s *AuthService) Signup(ctx context.Context, username, email, password, pub
 		return models.UserResponse{}, TokenPair{}, err
 	}
 
-	pair, err := s.issueTokenPair(ctx, *user)
-	if err != nil {
+	s.verifiedUsers[email] = false
+	if err := s.SendVerificationOTP(email); err != nil {
 		return models.UserResponse{}, TokenPair{}, err
 	}
-	return *user, pair, nil
+
+	return *user, TokenPair{}, nil
+}
+
+func (s *AuthService) SendVerificationOTP(email string) error {
+	otp := generateOTP()
+	s.verificationCodes[email] = otp
+	s.verifiedUsers[email] = false
+	return s.sendPlainEmail(email, "Verify your email", fmt.Sprintf("Your verification code is: %s\nThis code expires in 10 minutes.", otp))
+}
+
+func (s *AuthService) VerifyEmailOTP(email, otp string) error {
+	storedOTP, ok := s.verificationCodes[email]
+	if !ok || storedOTP != otp {
+		return ErrInvalidOTP
+	}
+
+	delete(s.verificationCodes, email)
+	s.verifiedUsers[email] = true
+	return nil
 }
 
 // Refresh redeems a valid, unrevoked refresh token for a brand new

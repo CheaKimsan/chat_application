@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { useAuthStore } from "../../store/auth.store";
 import { useQuery } from "@tanstack/react-query";
-import {UserResponse} from "../../components/user/core/model";
-import {reqGetUsers} from "../../components/user/core/request";
+import { UserResponse } from "../../components/user/core/model";
+import { reqGetUsers } from "../../components/user/core/request";
+import { ContactRound } from "lucide-react";
 
 const C = {
     bg: "#0F1113",
@@ -178,10 +179,87 @@ export default function Sidebar({ onSelectContact }: SidebarProps) {
                     left: 0,
                 }}
             >
-                <div style={{ padding: "18px 16px", borderBottom: `1px solid ${C.border}` }}>
-                    <div style={{ fontSize: 13, color: C.muted }}>Welcome</div>
-                    <div style={{ marginTop: 8, fontWeight: 700, fontFamily: "'Space Grotesk', sans-serif" }}>
-                        {user?.username ?? "Guest"}
+                <div style={{ padding: "14px 12px", borderBottom: `1px solid ${C.border}` }}>
+                    <div
+                        style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 10,
+                            padding: "10px 8px",
+                            borderRadius: 10,
+                            background: "#171B1E",
+                            border: `1px solid ${C.border}`,
+                        }}
+                    >
+                        <span
+                            style={{
+                                width: 38,
+                                height: 38,
+                                flexShrink: 0,
+                                borderRadius: 10,
+                                background: "#20242A",
+                                border: `1px solid ${C.border}`,
+                                display: "inline-flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                overflow: "hidden",
+                                color: C.muted,
+                                fontSize: 12,
+                                fontWeight: 700,
+                            }}
+                        >
+                            {user?.profile_photo ? (
+                                <img
+                                    src={user.profile_photo}
+                                    alt=""
+                                    style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                                />
+                            ) : (
+                                (user?.username ?? "Guest")
+                                    .split(" ")
+                                    .map((part) => part[0]?.toUpperCase())
+                                    .join("")
+                                    .slice(0, 2)
+                            )}
+                        </span>
+
+                        <span style={{ minWidth: 0, display: "flex", flexDirection: "column", gap: 3 }}>
+                            <span
+                                style={{
+                                    color: C.text,
+                                    fontSize: 13,
+                                    fontWeight: 700,
+                                    fontFamily: "'Space Grotesk', sans-serif",
+                                    overflow: "hidden",
+                                    textOverflow: "ellipsis",
+                                    whiteSpace: "nowrap",
+                                }}
+                            >
+                                {user?.username ?? "Guest"}
+                            </span>
+                            <span
+                                style={{
+                                    color: C.muted,
+                                    fontSize: 11,
+                                    overflow: "hidden",
+                                    textOverflow: "ellipsis",
+                                    whiteSpace: "nowrap",
+                                }}
+                            >
+                                {user?.email ?? "Not signed in"}
+                            </span>
+                            <span style={{ display: "flex", alignItems: "center", gap: 5, color: myPresence.color, fontSize: 11 }}>
+                                <span
+                                    style={{
+                                        width: 6,
+                                        height: 6,
+                                        borderRadius: "50%",
+                                        background: myPresence.color,
+                                    }}
+                                />
+                                {user ? myPresence.label : "Not signed in"}
+                            </span>
+                        </span>
                     </div>
                 </div>
 
@@ -222,7 +300,7 @@ export default function Sidebar({ onSelectContact }: SidebarProps) {
                                         transition: "background 120ms ease, color 120ms ease",
                                     }}
                                 >
-                                    {it.label[0]}
+                                    <ContactRound size={18} strokeWidth={1.8} />
                                 </span>
                                 <span style={{ fontSize: 13, fontWeight: isActive ? 600 : 400 }}>{it.label}</span>
                             </button>
@@ -291,9 +369,8 @@ export default function Sidebar({ onSelectContact }: SidebarProps) {
                                     style={{
                                         width: "100%",
                                         display: "flex",
-                                        flexDirection: "column",
-                                        alignItems: "flex-start",
-                                        gap: 2,
+                                        alignItems: "center",
+                                        gap: 10,
                                         padding: "10px 12px",
                                         borderRadius: 8,
                                         background: isSelected ? C.accentDim : "transparent",
@@ -310,33 +387,55 @@ export default function Sidebar({ onSelectContact }: SidebarProps) {
                                     }}
                                     aria-current={isSelected}
                                 >
-                                    <span style={{ fontSize: 13, fontWeight: 600 }}>{row.primary}</span>
-                                    {isTyping ? (
-                                        <span
-                                            style={{
-                                                fontSize: 12,
-                                                color: C.accent,
-                                                fontStyle: "italic",
-                                            }}
-                                        >
-                                            typing…
-                                        </span>
-                                    ) : (
-                                        <>
-                                            {row.secondary && (
-                                                <span style={{ fontSize: 12, color: C.muted }}>{row.secondary}</span>
-                                            )}
-                                            <span
-                                                style={{
-                                                    fontSize: 11,
-                                                    color: row.presence.color,
-                                                    marginTop: 2,
-                                                }}
-                                            >
-                                                {row.presence.label}
+                                    <span
+                                        style={{
+                                            width: 38,
+                                            height: 38,
+                                            flexShrink: 0,
+                                            borderRadius: 10,
+                                            background: "#20242A",
+                                            border: `1px solid ${C.border}`,
+                                            display: "inline-flex",
+                                            alignItems: "center",
+                                            justifyContent: "center",
+                                            overflow: "hidden",
+                                            color: C.muted,
+                                            fontSize: 12,
+                                            fontWeight: 700,
+                                        }}
+                                    >
+                                        {row.user?.profile_photo ? (
+                                            <img
+                                                src={row.user.profile_photo}
+                                                alt=""
+                                                style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                                            />
+                                        ) : (
+                                            row.primary
+                                                .split(" ")
+                                                .map((part) => part[0]?.toUpperCase())
+                                                .join("")
+                                                .slice(0, 2)
+                                        )}
+                                    </span>
+
+                                    <span style={{ minWidth: 0, display: "flex", flexDirection: "column", gap: 2 }}>
+                                        <span style={{ fontSize: 13, fontWeight: 600 }}>{row.primary}</span>
+                                        {isTyping ? (
+                                            <span style={{ fontSize: 12, color: C.accent, fontStyle: "italic" }}>
+                                                typing…
                                             </span>
-                                        </>
-                                    )}
+                                        ) : (
+                                            <>
+                                                {row.secondary && (
+                                                    <span style={{ fontSize: 12, color: C.muted }}>{row.secondary}</span>
+                                                )}
+                                                <span style={{ fontSize: 11, color: row.presence.color }}>
+                                                    {row.presence.label}
+                                                </span>
+                                            </>
+                                        )}
+                                    </span>
                                 </button>
                             );
                         })

@@ -20,14 +20,24 @@ type LoginRequest struct {
 }
 
 type UpdateUserRequest struct {
-	Username *string `json:"username"`
-	Email    *string `json:"email"`
-	Role     *string `json:"role" binding:"omitempty,oneof=admin user"`
-	Password *string `json:"password" binding:"omitempty,min=6"`
+	Username     *string `json:"username"`
+	Email        *string `json:"email"`
+	Role         *string `json:"role" binding:"omitempty,oneof=admin user"`
+	Password     *string `json:"password" binding:"omitempty,min=6"`
+	ProfilePhoto *string `json:"profile_photo"`
 }
 
 type RefreshRequest struct {
 	RefreshToken string `json:"refresh_token" binding:"required"`
+}
+
+type VerifyEmailRequest struct {
+	Email string `json:"email" binding:"required,email"`
+	OTP   string `json:"otp" binding:"required,len=6"`
+}
+
+type ResendVerificationRequest struct {
+	Email string `json:"email" binding:"required,email"`
 }
 
 type SessionResponse struct {

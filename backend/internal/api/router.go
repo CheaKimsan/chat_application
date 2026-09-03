@@ -99,7 +99,7 @@ func NewRouter(db *sql.DB, pool *ws.Pool, jwtSecret []byte, refreshSecret []byte
 
 	authHandler := handlers.NewAuthHandler(authService, inviteService)
 
-	userService := services.NewUserService(userRepo)
+	userService := services.NewUserService(userRepo, minioStore)
 	userHandler := handlers.NewUserHandler(userService)
 
 	messageRepo := repository.NewMessageRepository(db)

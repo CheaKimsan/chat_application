@@ -3,12 +3,10 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Eye, EyeOff, Lock, User, Mail } from "lucide-react";
 import axios from "axios";
 import Logo from "../../../../src/assets/image/message-image.png";
-import {RegisterFormData, RegisterFormErrors} from "./core/model";
-import {validateInviteRequest} from "./core/requestInvite";
-import {registerRequest} from "./core/requestRegister";
-import {exportPublicKeyBase64, generateAndStoreKeyPair} from "../../../socket/crypto";
-import {useAuthStore} from "../../../store/auth.store";
-import {connectSocket} from "../../../socket/socketClient";
+import { RegisterFormData, RegisterFormErrors } from "./core/model";
+import { validateInviteRequest } from "./core/requestInvite";
+import { registerRequest, verifyEmailRequest, resendVerificationRequest } from "./core/requestRegister";
+import { exportPublicKeyBase64, generateAndStoreKeyPair } from "../../../socket/crypto";
 
 export default function RegisterForm() {
     const navigate = useNavigate();
@@ -23,11 +21,19 @@ export default function RegisterForm() {
     const [showPassword, setShowPassword] = useState<boolean>(false);
     const [errors, setErrors] = useState<RegisterFormErrors>({});
     const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
-
+    const [otpSent, setOtpSent] = useState<boolean>(false);
+    const [otpCode, setOtpCode] = useState<string>("");
+    const [resendCooldown, setResendCooldown] = useState<number>(0);
 
     const [inviteEmailLocked, setInviteEmailLocked] = useState<boolean>(false);
     const [checkingInvite, setCheckingInvite] = useState<boolean>(!!inviteToken);
     const [inviteError, setInviteError] = useState<string | undefined>(undefined);
+
+    useEffect(() => {
+        if (resendCooldown <= 0) return;
+        const timer = window.setTimeout(() => setResendCooldown((prev) => prev - 1), 1000);
+        return () => window.clearTimeout(timer);
+    }, [resendCooldown]);
 
     useEffect(() => {
         if (!inviteToken) return;
@@ -85,33 +91,21 @@ export default function RegisterForm() {
 
         setIsSubmitting(true);
         try {
-            // Generate the E2EE key pair client-side. The private key is
-            // written straight to IndexedDB and never leaves the browser --
-            // only the exported public key (as base64) goes in the payload.
             const keyPair = await generateAndStoreKeyPair();
             const publicKey = await exportPublicKeyBase64(keyPair.publicKey);
 
-            const data = await registerRequest({
+            await registerRequest({
                 username: formData.username,
                 email: formData.email,
                 password: formData.password,
                 public_key: publicKey,
-                // Pass the invite token through so the backend can mark
-                // it consumed once this signup succeeds. Harmless/ignored
-                // if there was no invite.
                 ...(inviteToken ? { invite_token: inviteToken } : {}),
             });
 
-            // NOTE: server returns `access_token` + `refresh_token`,
-            // not `token` — this was the bug causing "Registration failed"
-            // even after a successful signup.
-            useAuthStore.getState().setUser(data.user, data.access_token);
-            localStorage.setItem("token", data.access_token);
-            localStorage.setItem("refresh_token", data.refresh_token);
-
-            await connectSocket(data.access_token);
-
-            navigate("/dashboard");
+            setOtpSent(true);
+            setOtpCode("");
+            setErrors({});
+            setResendCooldown(30);
         } catch (err) {
             let message = "Registration failed. Please try again.";
             if (axios.isAxiosError(err)) {
@@ -120,6 +114,40 @@ export default function RegisterForm() {
             setErrors({ form: message });
         } finally {
             setIsSubmitting(false);
+        }
+    };
+
+    const handleVerifyOTP = async () => {
+        if (!otpCode.trim()) {
+            setErrors((prev) => ({ ...prev, otp: "OTP is required" }));
+            return;
+        }
+
+        try {
+            await verifyEmailRequest({ email: formData.email, otp: otpCode.trim() });
+            navigate("/");
+        } catch (err) {
+            let message = "Invalid or expired OTP.";
+            if (axios.isAxiosError(err)) {
+                message = err.response?.data?.message ?? message;
+            }
+            setErrors({ ...errors, otp: message });
+        }
+    };
+
+    const handleResendOTP = async () => {
+        if (resendCooldown > 0) return;
+
+        try {
+            await resendVerificationRequest(formData.email);
+            setResendCooldown(30);
+            setErrors((prev) => ({ ...prev, otp: undefined }));
+        } catch (err) {
+            let message = "Could not resend verification code.";
+            if (axios.isAxiosError(err)) {
+                message = err.response?.data?.message ?? message;
+            }
+            setErrors((prev) => ({ ...prev, otp: message }));
         }
     };
 
@@ -146,87 +174,131 @@ export default function RegisterForm() {
                     </div>
                 )}
 
-                <form onSubmit={handleSubmit} className="space-y-5" noValidate>
-                    {errors.form && (
-                        <div className="bg-red-50 border border-red-200 text-red-600 text-sm rounded-lg px-4 py-2">
-                            {errors.form}
-                        </div>
-                    )}
+                {!otpSent ? (
+                    <form onSubmit={handleSubmit} className="space-y-5" noValidate>
+                        {errors.form && (
+                            <div className="bg-red-50 border border-red-200 text-red-600 text-sm rounded-lg px-4 py-2">
+                                {errors.form}
+                            </div>
+                        )}
 
-                    <div>
-                        <label htmlFor="username" className="block text-sm font-medium text-white mb-1.5">
-                            Username
-                        </label>
-                        <div className="relative">
-                            <User className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                        <div>
+                            <label htmlFor="username" className="block text-sm font-medium text-white mb-1.5">
+                                Username
+                            </label>
+                            <div className="relative">
+                                <User className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                                <input
+                                    id="username"
+                                    name="username"
+                                    type="text"
+                                    value={formData.username}
+                                    onChange={handleChange}
+                                    placeholder="yourusername"
+                                    className={`w-full pl-10 pr-4 py-2.5 rounded-lg border text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition ${errors.username ? "border-red-400" : "border-slate-300"}`}
+                                />
+                            </div>
+                            {errors.username && <p className="text-red-500 text-xs mt-1">{errors.username}</p>}
+                        </div>
+
+                        <div>
+                            <label htmlFor="email" className="block text-sm font-medium text-white mb-1.5">
+                                Email
+                            </label>
+                            <div className="relative">
+                                <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                                <input
+                                    id="email"
+                                    name="email"
+                                    type="email"
+                                    value={formData.email}
+                                    onChange={inviteEmailLocked ? undefined : handleChange}
+                                    readOnly={inviteEmailLocked}
+                                    placeholder="you@example.com"
+                                    className={`w-full pl-10 pr-4 py-2.5 rounded-lg border text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition ${errors.email ? "border-red-400" : "border-slate-300"} ${inviteEmailLocked ? "bg-slate-100 cursor-not-allowed" : ""}`}
+                                />
+                            </div>
+                            {errors.email && <p className="text-red-500 text-xs mt-1">{errors.email}</p>}
+                        </div>
+
+                        <div>
+                            <label htmlFor="password" className="block text-sm font-medium text-white mb-1.5">
+                                Password
+                            </label>
+                            <div className="relative">
+                                <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                                <input
+                                    id="password"
+                                    name="password"
+                                    type={showPassword ? "text" : "password"}
+                                    value={formData.password}
+                                    onChange={handleChange}
+                                    placeholder="••••••••"
+                                    className={`w-full pl-10 pr-10 py-2.5 rounded-lg border text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition ${errors.password ? "border-red-400" : "border-slate-300"}`}
+                                />
+                                <button
+                                    type="button"
+                                    onClick={() => setShowPassword((prev) => !prev)}
+                                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                                    tabIndex={-1}
+                                >
+                                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                                </button>
+                            </div>
+                            {errors.password && <p className="text-red-500 text-xs mt-1">{errors.password}</p>}
+                        </div>
+
+                        <button
+                            type="submit"
+                            disabled={isSubmitting}
+                            className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white font-medium py-2.5 rounded-lg transition"
+                        >
+                            {isSubmitting ? "Creating account..." : "Sign up"}
+                        </button>
+                    </form>
+                ) : (
+                    <div className="space-y-5">
+                        <div className="rounded-lg border border-indigo-500/40 bg-indigo-500/10 p-4 text-sm text-indigo-100">
+                            We sent a 6-digit code to <span className="font-semibold">{formData.email}</span>.
+                        </div>
+
+                        <div>
+                            <label htmlFor="otp" className="block text-sm font-medium text-white mb-1.5">
+                                Verification code
+                            </label>
                             <input
-                                id="username"
-                                name="username"
+                                id="otp"
+                                name="otp"
                                 type="text"
-                                value={formData.username}
-                                onChange={handleChange}
-                                placeholder="yourusername"
-                                className={`w-full pl-10 pr-4 py-2.5 rounded-lg border text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition ${errors.username ? "border-red-400" : "border-slate-300"}`}
+                                inputMode="numeric"
+                                maxLength={6}
+                                value={otpCode}
+                                onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                                placeholder="123456"
+                                className={`w-full px-4 py-2.5 rounded-lg border text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition ${errors.otp ? "border-red-400" : "border-slate-300"}`}
                             />
+                            {errors.otp && <p className="text-red-500 text-xs mt-1">{errors.otp}</p>}
                         </div>
-                        {errors.username && <p className="text-red-500 text-xs mt-1">{errors.username}</p>}
-                    </div>
 
-                    <div>
-                        <label htmlFor="email" className="block text-sm font-medium text-white mb-1.5">
-                            Email
-                        </label>
-                        <div className="relative">
-                            <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                            <input
-                                id="email"
-                                name="email"
-                                type="email"
-                                value={formData.email}
-                                onChange={inviteEmailLocked ? undefined : handleChange}
-                                readOnly={inviteEmailLocked}
-                                placeholder="you@example.com"
-                                className={`w-full pl-10 pr-4 py-2.5 rounded-lg border text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition ${errors.email ? "border-red-400" : "border-slate-300"} ${inviteEmailLocked ? "bg-slate-100 cursor-not-allowed" : ""}`}
-                            />
-                        </div>
-                        {errors.email && <p className="text-red-500 text-xs mt-1">{errors.email}</p>}
-                    </div>
-
-                    <div>
-                        <label htmlFor="password" className="block text-sm font-medium text-white mb-1.5">
-                            Password
-                        </label>
-                        <div className="relative">
-                            <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                            <input
-                                id="password"
-                                name="password"
-                                type={showPassword ? "text" : "password"}
-                                value={formData.password}
-                                onChange={handleChange}
-                                placeholder="••••••••"
-                                className={`w-full pl-10 pr-10 py-2.5 rounded-lg border text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition ${errors.password ? "border-red-400" : "border-slate-300"}`}
-                            />
+                        <div className="flex gap-3">
                             <button
                                 type="button"
-                                onClick={() => setShowPassword((prev) => !prev)}
-                                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
-                                tabIndex={-1}
+                                onClick={handleVerifyOTP}
+                                className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-2.5 rounded-lg transition"
                             >
-                                {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                                Verify email
+                            </button>
+                            <button
+                                type="button"
+                                onClick={handleResendOTP}
+                                disabled={resendCooldown > 0}
+                                className="flex-1 bg-slate-700 hover:bg-slate-600 disabled:bg-slate-500 text-white font-medium py-2.5 rounded-lg transition"
+                            >
+                                {resendCooldown > 0 ? `Resend (${resendCooldown}s)` : "Resend"}
                             </button>
                         </div>
-                        {errors.password && <p className="text-red-500 text-xs mt-1">{errors.password}</p>}
                     </div>
-
-                    <button
-                        type="submit"
-                        disabled={isSubmitting}
-                        className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white font-medium py-2.5 rounded-lg transition"
-                    >
-                        {isSubmitting ? "Creating account..." : "Sign up"}
-                    </button>
-                </form>
+                )}
 
                 <p className="text-center text-sm text-slate-500 mt-6">
                     Already have an account?{" "}

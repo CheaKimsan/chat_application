@@ -11,21 +11,22 @@ export default function InviteButton() {
                 type="button"
                 onClick={() => setIsOpen(true)}
                 style={{
+                    width: '100%',
+                    border: 'none',
+                    background: 'transparent',
+                    color: '#eef2f7',
                     display: 'flex',
                     alignItems: 'center',
-                    gap: 6,
-                    padding: '6px 12px',
-                    borderRadius: 6,
-                    border: '1px solid #2A2D32',
-                    background: '#101317',
-                    color: '#E7E3DA',
+                    gap: 10,
+                    padding: '10px 16px',
                     cursor: 'pointer',
-                    fontWeight: 600,
-                    fontSize: 13,
+                    textAlign: 'left',
+                    fontSize: 14,
+                    fontWeight: 500,
                 }}
             >
-                <UserPlus size={14} />
-                Invite
+                <UserPlus size={18} color="#d9e0ee" />
+                <span>Invite user</span>
             </button>
 
             {isOpen && (
@@ -43,7 +44,7 @@ export default function InviteButton() {
                     }}
                 >
                     <div
-                        onClick={(e) => e.stopPropagation()} // don't close when clicking inside the card
+                        onClick={(e) => e.stopPropagation()}
                         style={{ position: 'relative' }}
                     >
                         <button

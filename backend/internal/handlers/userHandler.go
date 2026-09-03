@@ -4,6 +4,7 @@ import (
 	"errors"
 	"golang-jwt-project/internal/utils"
 	"net/http"
+	"path/filepath"
 
 	"golang-jwt-project/internal/middleware"
 	"golang-jwt-project/internal/models"
@@ -35,6 +36,7 @@ func (h *UserHandler) RegisterRoutes(router *gin.RouterGroup) {
 	// and has never completed a live socket handshake before).
 	router.GET("/:id/public-key", h.GetPublicKey)
 	router.PUT("/me/public-key", h.UpdateMyPublicKey)
+	router.POST("/:id/photo", h.UploadProfilePhoto) // <-- add this
 }
 
 func (h *UserHandler) List(c *gin.Context) {
@@ -152,4 +154,55 @@ func (h *UserHandler) UpdateMyPublicKey(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "public key updated"})
+}
+
+func (h *UserHandler) UploadProfilePhoto(c *gin.Context) {
+	targetID := c.Param("id")
+
+	targetUsername := c.Query("username") // Get the username from the query parameter
+
+	if targetID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "user id is required"})
+		return
+	}
+
+	callerID, callerRole := middleware.CallerFromContext(c)
+
+	fileHeader, err := c.FormFile("photo")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "missing photo file"})
+		return
+	}
+	if fileHeader.Size > 5<<20 { // 5MB limit
+		c.JSON(http.StatusBadRequest, gin.H{"error": "file too large"})
+		return
+	}
+
+	file, err := fileHeader.Open()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "could not read file"})
+		return
+	}
+	defer file.Close()
+
+	ext := filepath.Ext(fileHeader.Filename)
+	contentType := fileHeader.Header.Get("Content-Type")
+
+	user, err := h.service.UpdateProfilePhoto(
+		c.Request.Context(), callerID, callerRole, targetUsername, targetID,
+		file, fileHeader.Size, contentType, ext,
+	)
+	if err != nil {
+		switch {
+		case errors.Is(err, utils.ErrForbidden):
+			c.JSON(http.StatusForbidden, gin.H{"error": "not allowed"})
+		case errors.Is(err, utils.ErrUserNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "upload failed"})
+		}
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "profile photo updated", "user": user})
 }

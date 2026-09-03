@@ -6,6 +6,7 @@ type UserResponse struct {
 	Email        string `json:"email"`
 	PasswordHash string `json:"-"`
 	Role         string `json:"role"`
+	ProfilePhoto string `json:"profile_photo"`
 }
 
 type UpdatePublicKeyRequest struct {

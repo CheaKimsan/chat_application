@@ -4,7 +4,11 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
+	"golang-jwt-project/internal/storage"
 	"golang-jwt-project/internal/utils"
+	"io"
+	"time"
 
 	"golang-jwt-project/internal/models"
 	"golang-jwt-project/internal/repository"
@@ -15,11 +19,12 @@ import (
 var ErrPublicKeyNotSet = errors.New("public key not set for this user")
 
 type UserService struct {
-	users *repository.UserRepository
+	users   *repository.UserRepository
+	storage *storage.MinioStorage
 }
 
-func NewUserService(users *repository.UserRepository) *UserService {
-	return &UserService{users: users}
+func NewUserService(users *repository.UserRepository, storage *storage.MinioStorage) *UserService {
+	return &UserService{users: users, storage: storage}
 }
 
 func (s *UserService) ListAll(ctx context.Context) ([]models.UserResponse, error) {
@@ -48,7 +53,7 @@ func (s *UserService) Update(ctx context.Context, callerID, callerRole, targetID
 		passwordHash = &s
 	}
 
-	user, err := s.users.Update(ctx, targetID, req.Username, req.Email, passwordHash, req.Role)
+	user, err := s.users.Update(ctx, targetID, req.Username, req.Email, passwordHash, req.Role, req.ProfilePhoto)
 	if err != nil {
 		return models.UserResponse{}, err
 	}
@@ -91,4 +96,29 @@ func (s *UserService) GetPublicKey(ctx context.Context, userID string) (string, 
 // UpdatePublicKey (re)publishes the caller's own public key.
 func (s *UserService) UpdatePublicKey(ctx context.Context, userID string, publicKey string) error {
 	return s.users.UpdatePublicKey(ctx, userID, publicKey)
+}
+
+// UpdateProfilePhoto uploads a new avatar to MinIO and saves its URL on the user.
+func (s *UserService) UpdateProfilePhoto(ctx context.Context, callerID, callerRole, targetUsername, targetID string, file io.Reader, size int64, contentType, ext string) (models.UserResponse, error) {
+	if !canModify(callerID, callerRole, targetID) {
+		return models.UserResponse{}, utils.ErrForbidden
+	}
+
+	timestamp := time.Now().Unix()
+	objectName := fmt.Sprintf("avatars/%s_%s_%d%s", targetID, targetUsername, timestamp, ext)
+
+	if err := s.storage.UploadStream(ctx, objectName, file, size, contentType); err != nil {
+		return models.UserResponse{}, err
+	}
+
+	url := s.storage.PublicURL(objectName)
+
+	user, err := s.users.UpdateProfilePhoto(ctx, targetID, url)
+	if err != nil {
+		return models.UserResponse{}, err
+	}
+	if user == nil {
+		return models.UserResponse{}, utils.ErrUserNotFound
+	}
+	return *user, nil
 }

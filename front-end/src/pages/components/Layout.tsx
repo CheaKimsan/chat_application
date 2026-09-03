@@ -7,8 +7,9 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTypingUsers } from '../../store/typing.store';
 import { connectSocket, disconnectSocket, sendTyping } from '../../socket/socketClient';
 import UserMenu from "../../shared/UserMenu";
-import {UserResponse} from "../../components/user/core/model";
-import {reqSendMessage, reqUploadFile} from "../../components/message/core/request";
+import { UserResponse } from "../../components/user/core/model";
+import { reqSendMessage, reqUploadFile } from "../../components/message/core/request";
+import { Paperclip, Send } from 'lucide-react';
 
 
 export default function Layout() {
@@ -35,6 +36,7 @@ export default function Layout() {
             name: selectedContact.username,
             freq: '104.2',
             online: true,
+            profilePhoto: selectedContact.profile_photo,
             initials: (selectedContact.username)
                 .split(' ')
                 .map((part: string) => part[0]?.toUpperCase())
@@ -46,6 +48,7 @@ export default function Layout() {
                 name: user.username,
                 freq: '104.2',
                 online: true,
+                profilePhoto: user.profile_photo,
                 initials: user.username
                     .split(' ')
                     .map((part: string) => part[0]?.toUpperCase())
@@ -207,11 +210,11 @@ export default function Layout() {
                             gap: 8,
                         }}
                     >
-                        {user && <UserMenu username={user.username} email={user.email} onLogout={handleLogout}/>}
+                        {user && <UserMenu username={user.username} email={user.email} onLogout={handleLogout} />}
                     </div>
                 </div>
-                <div style={{flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, overflow: 'hidden'}}>
-                    <div style={{flex: 1, overflowY: 'auto', overflowX: 'hidden', minHeight: 0}}>
+                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, overflow: 'hidden' }}>
+                    <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', minHeight: 0 }}>
                         <Outlet context={{
                             outletInput,
                             setOutletInput,
@@ -221,7 +224,7 @@ export default function Layout() {
                             uploadedBytes,
                             uploadTotalBytes,
                             uploadFileCount
-                        }}/>
+                        }} />
                     </div>
 
                     <form
@@ -270,7 +273,7 @@ export default function Layout() {
                                     }} />
                                     Uploading...
                                 </>
-                            ) : 'Upload Files'}
+                            ) : <Paperclip size={16} />}
                         </button>
 
                         <input
@@ -294,7 +297,7 @@ export default function Layout() {
                                 fontWeight: 600,
                             }}
                         >
-                            {sendMutation.isPending ? 'Sending...' : 'Send'}
+                            {sendMutation.isPending ? 'Sending...' : <Send size={16} />}
                         </button>
                     </form>
                 </div>

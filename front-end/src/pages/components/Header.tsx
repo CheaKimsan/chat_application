@@ -13,9 +13,10 @@ export interface Contact {
     freq: string;
     online: boolean;
     initials: string;
+    profilePhoto?: string;
 }
 
-function InitialsAvatar({ initials, online }: { initials: string; online: boolean }) {
+function InitialsAvatar({ initials, online, profilePhoto }: { initials: string; online: boolean; profilePhoto?: string }) {
     return (
         <div style={{ position: 'relative', width: 40, height: 40, flexShrink: 0 }}>
             <div
@@ -35,7 +36,15 @@ function InitialsAvatar({ initials, online }: { initials: string; online: boolea
                     letterSpacing: 0.5,
                 }}
             >
-                {initials}
+                {profilePhoto ? (
+                    <img
+                        src={profilePhoto}
+                        alt=""
+                        style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                    />
+                ) : (
+                    initials
+                )}
             </div>
 
             {online && (
@@ -124,7 +133,11 @@ export default function ChatHeader({
                 <ChevronLeft size={18} />
             </button>
 
-            <InitialsAvatar initials={display?.initials ?? '??'} online={display?.online ?? false} />
+            <InitialsAvatar
+                initials={display?.initials ?? '??'}
+                online={display?.online ?? false}
+                profilePhoto={display?.profilePhoto}
+            />
 
             <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 14.5, fontWeight: 600, fontFamily: "'Space Grotesk', sans-serif" }}>

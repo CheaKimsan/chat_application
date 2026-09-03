@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"log"
 
 	"golang-jwt-project/internal/models"
 )
@@ -18,8 +19,8 @@ func NewUserRepository(db *sql.DB) *UserRepository {
 func (r *UserRepository) GetByUsername(ctx context.Context, username string) (*models.UserResponse, error) {
 	var u models.UserResponse
 	err := r.db.QueryRowContext(ctx,
-		"SELECT id, username, email, password_hash, role FROM users WHERE username = $1", username,
-	).Scan(&u.ID, &u.Username, &u.Email, &u.PasswordHash, &u.Role)
+		"SELECT id, username, email, password_hash, role, profile_photo FROM users WHERE username = $1", username,
+	).Scan(&u.ID, &u.Username, &u.Email, &u.PasswordHash, &u.Role, &u.ProfilePhoto)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
@@ -32,8 +33,8 @@ func (r *UserRepository) GetByUsername(ctx context.Context, username string) (*m
 func (r *UserRepository) GetByID(ctx context.Context, id string) (*models.UserResponse, error) {
 	var u models.UserResponse
 	err := r.db.QueryRowContext(ctx,
-		"SELECT id, username, email, password_hash, role FROM users WHERE id = $1", id,
-	).Scan(&u.ID, &u.Username, &u.Email, &u.PasswordHash, &u.Role)
+		"SELECT id, username, email, password_hash, role, profile_photo FROM users WHERE id = $1", id,
+	).Scan(&u.ID, &u.Username, &u.Email, &u.PasswordHash, &u.Role, &u.ProfilePhoto)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
@@ -56,8 +57,9 @@ func (r *UserRepository) ExistsByUsername(ctx context.Context, username string) 
 }
 
 func (r *UserRepository) GetAll(ctx context.Context) ([]models.UserResponse, error) {
-	rows, err := r.db.QueryContext(ctx, "SELECT id, username, email, password_hash, role FROM users")
+	rows, err := r.db.QueryContext(ctx, "SELECT id, username, email, password_hash, role, profile_photo FROM users")
 	if err != nil {
+		log.Println("Error querying users:", err)
 		return nil, err
 	}
 	defer rows.Close()
@@ -65,7 +67,7 @@ func (r *UserRepository) GetAll(ctx context.Context) ([]models.UserResponse, err
 	var users []models.UserResponse
 	for rows.Next() {
 		var u models.UserResponse
-		if err := rows.Scan(&u.ID, &u.Username, &u.Email, &u.PasswordHash, &u.Role); err != nil {
+		if err := rows.Scan(&u.ID, &u.Username, &u.Email, &u.PasswordHash, &u.Role, &u.ProfilePhoto); err != nil {
 			return nil, err
 		}
 		users = append(users, u)
@@ -76,7 +78,7 @@ func (r *UserRepository) GetAll(ctx context.Context) ([]models.UserResponse, err
 	return users, nil
 }
 
-func (r *UserRepository) Update(ctx context.Context, id string, username, email, passwordHash, role *string) (*models.UserResponse, error) {
+func (r *UserRepository) Update(ctx context.Context, id string, username, email, passwordHash, role, profilePhoto *string) (*models.UserResponse, error) {
 	var u models.UserResponse
 	err := r.db.QueryRowContext(
 		ctx,
@@ -84,11 +86,12 @@ func (r *UserRepository) Update(ctx context.Context, id string, username, email,
 		 SET username = COALESCE($1, username),
 		     email = COALESCE($2, email),
 		     password_hash = COALESCE($3, password_hash),
-		     role = COALESCE($4, role)
-		 WHERE id = $5
-		 RETURNING id, username, role, password_hash`,
-		username, email, passwordHash, role, id,
-	).Scan(&u.ID, &u.Username, &u.Role, &u.PasswordHash)
+		     role = COALESCE($4, role),
+		     profile_photo = COALESCE($5, profile_photo)
+		 WHERE id = $6
+		 RETURNING id, username, email, role, password_hash, profile_photo`,
+		username, email, passwordHash, role, profilePhoto, id,
+	).Scan(&u.ID, &u.Username, &u.Email, &u.Role, &u.PasswordHash, &u.ProfilePhoto)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
@@ -115,11 +118,11 @@ func (r *UserRepository) Delete(ctx context.Context, id string) (bool, error) {
 func (r *UserRepository) Create(ctx context.Context, username, email, role, passwordHash, publicKey string) (*models.UserResponse, error) {
 	var u models.UserResponse
 	err := r.db.QueryRowContext(ctx,
-		`INSERT INTO users (username, email, role, password_hash, public_key)
-			VALUES ($1, $2, $3, $4, $5)
-			RETURNING id, username, role`,
+		`INSERT INTO users (username, email, role, password_hash, public_key, profile_photo)
+			VALUES ($1, $2, $3, $4, $5, '')
+			RETURNING id, username, email, role, profile_photo`,
 		username, email, role, passwordHash, publicKey,
-	).Scan(&u.ID, &u.Username, &u.Role)
+	).Scan(&u.ID, &u.Username, &u.Email, &u.Role, &u.ProfilePhoto)
 	if err != nil {
 		return nil, err
 	}
@@ -157,8 +160,24 @@ func (r *UserRepository) UpdatePasswordHash(ctx context.Context, userID, newPass
 func (r *UserRepository) GetByEmail(ctx context.Context, email string) (*models.UserResponse, error) {
 	var u models.UserResponse
 	err := r.db.QueryRowContext(ctx,
-		"SELECT id, username, email, password_hash, role FROM users WHERE email = $1", email,
-	).Scan(&u.ID, &u.Username, &u.Email, &u.PasswordHash, &u.Role)
+		"SELECT id, username, email, password_hash, role, profile_photo FROM users WHERE email = $1", email,
+	).Scan(&u.ID, &u.Username, &u.Email, &u.PasswordHash, &u.Role, &u.ProfilePhoto)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &u, nil
+}
+
+func (r *UserRepository) UpdateProfilePhoto(ctx context.Context, id string, profilePhoto string) (*models.UserResponse, error) {
+	var u models.UserResponse
+	err := r.db.QueryRowContext(ctx,
+		`UPDATE users SET profile_photo = $1 WHERE id = $2
+		 RETURNING id, username, email, role, profile_photo`,
+		profilePhoto, id,
+	).Scan(&u.ID, &u.Username, &u.Email, &u.Role, &u.ProfilePhoto)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil

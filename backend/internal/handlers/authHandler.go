@@ -27,6 +27,8 @@ func NewAuthHandler(service *services.AuthService, inviteService *services.Invit
 func (h *AuthHandler) RegisterRoutes(router *gin.RouterGroup, authLimiter *middleware.RateLimiter) {
 	router.POST("/login", authLimiter.Middleware(), h.Login)
 	router.POST("/signup", authLimiter.Middleware(), h.Signup)
+	router.POST("/verify-email", authLimiter.Middleware(), h.VerifyEmail)
+	router.POST("/resend-verification", authLimiter.Middleware(), h.ResendVerification)
 	router.POST("/refresh", authLimiter.Middleware(), h.Refresh)
 	router.POST("/logout", h.Logout)
 	router.POST("/forgot-password", authLimiter.Middleware(), h.ForgotPassword)
@@ -76,7 +78,7 @@ func (h *AuthHandler) Signup(c *gin.Context) {
 		return
 	}
 
-	user, pair, err := h.service.Signup(c.Request.Context(), req.Username, req.Email, req.Password, req.PublicKey)
+	user, _, err := h.service.Signup(c.Request.Context(), req.Username, req.Email, req.Password, req.PublicKey)
 	if err != nil {
 		if errors.Is(err, utils.ErrUsernameTaken) {
 			c.JSON(http.StatusConflict, gin.H{"message": "username already exists"})
@@ -93,11 +95,44 @@ func (h *AuthHandler) Signup(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusCreated, gin.H{
-		"message":       "user registered successfully",
-		"user":          gin.H{"id": user.ID, "username": user.Username, "role": user.Role},
-		"access_token":  pair.AccessToken,
-		"refresh_token": pair.RefreshToken,
+		"message": "user registered successfully. Please verify your email with the OTP sent to your inbox.",
+		"user":    gin.H{"id": user.ID, "username": user.Username, "email": user.Email, "role": user.Role},
 	})
+}
+
+func (h *AuthHandler) VerifyEmail(c *gin.Context) {
+	var req models.VerifyEmailRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "email and OTP are required", "error": err.Error()})
+		return
+	}
+
+	if err := h.service.VerifyEmailOTP(req.Email, req.OTP); err != nil {
+		switch {
+		case errors.Is(err, services.ErrInvalidOTP):
+			c.JSON(http.StatusUnauthorized, gin.H{"message": "invalid or expired OTP"})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"message": "failed to verify email"})
+		}
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "email verified successfully"})
+}
+
+func (h *AuthHandler) ResendVerification(c *gin.Context) {
+	var req models.ResendVerificationRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "email is required", "error": err.Error()})
+		return
+	}
+
+	if err := h.service.SendVerificationOTP(req.Email); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"message": "failed to send verification code"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "a new verification code has been sent to your email"})
 }
 
 func (h *AuthHandler) Refresh(c *gin.Context) {

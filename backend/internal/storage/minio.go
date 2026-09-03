@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 type MinioStorage struct {
 	client     *minio.Client
 	bucketName string
+	publicBase string
 }
 
 func NewMinioStorage(endpoint, accessKey, secretKey, bucketName string, useSSL bool) (*MinioStorage, error) {
@@ -34,7 +36,32 @@ func NewMinioStorage(endpoint, accessKey, secretKey, bucketName string, useSSL b
 		}
 	}
 
-	return &MinioStorage{client: client, bucketName: bucketName}, nil
+	// Make the bucket publicly readable so avatar URLs work without expiry.
+	// If you'd rather keep photos private, skip this and use GetPresignedURL
+	// instead of PublicURL when returning user data.
+	policy := fmt.Sprintf(`{
+		"Version": "2012-10-17",
+		"Statement": [{
+			"Effect": "Allow",
+			"Principal": {"AWS": ["*"]},
+			"Action": ["s3:GetObject"],
+			"Resource": ["arn:aws:s3:::%s/*"]
+		}]
+	}`, bucketName)
+	if err := client.SetBucketPolicy(ctx, bucketName, policy); err != nil {
+		return nil, err
+	}
+
+	scheme := "http"
+	if useSSL {
+		scheme = "https"
+	}
+
+	return &MinioStorage{
+		client:     client,
+		bucketName: bucketName,
+		publicBase: fmt.Sprintf("%s://%s/%s", scheme, endpoint, bucketName),
+	}, nil
 }
 
 func (s *MinioStorage) UploadStream(ctx context.Context, objectName string, reader io.Reader, size int64, contentType string) error {
@@ -42,6 +69,12 @@ func (s *MinioStorage) UploadStream(ctx context.Context, objectName string, read
 		ContentType: contentType,
 	})
 	return err
+}
+
+// PublicURL returns a permanent, non-expiring URL for an object.
+// Only works if the bucket policy allows public reads (see above).
+func (s *MinioStorage) PublicURL(objectName string) string {
+	return s.publicBase + "/" + objectName
 }
 
 func (s *MinioStorage) GetPresignedURL(ctx context.Context, objectName string, expiry time.Duration) (string, error) {

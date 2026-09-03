@@ -3,6 +3,7 @@ interface UserResponse {
     username: string;
     email: string;
     role: string;
+    profile_photo?: string;
 }
 
 export type {
