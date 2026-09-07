@@ -1,6 +1,6 @@
 import axios, { AxiosError, AxiosRequestConfig } from "axios";
 
-const BASE_URL = "http://localhost:8000/api/v1";
+const BASE_URL = `${window.location.protocol}//${window.location.hostname}:8000/api/v1`;
 
 let refreshPromise: Promise<string> | null = null;
 

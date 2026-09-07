@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useOutletContext } from "react-router-dom";
 import { useAuthStore } from "../../store/auth.store";
@@ -6,7 +6,17 @@ import { sendMarkRead } from "../../socket/socketClient";
 import { UserResponse } from "../../components/user/core/model";
 import { LoadingSpinner } from "../../shared/LoadingSpinner";
 import { MessageResponse } from "../../components/message/core/model";
-import { reqGetMessages } from "../../components/message/core/request";
+import { reqGetCallHistory, reqGetMessages } from "../../components/message/core/request";
+import { ArrowDownLeft, ArrowUpRight, Phone, Video } from "lucide-react";
+
+type CallRecord = {
+    id: string;
+    mode: "audio" | "video";
+    status: string;
+    createdAt: string;
+    durationSeconds?: number;
+    direction?: "incoming" | "outgoing";
+};
 
 export default function ChatWindow() {
     const { selectedContact, isUploading, uploadProgress, uploadedBytes, uploadTotalBytes } = useOutletContext<{
@@ -19,6 +29,40 @@ export default function ChatWindow() {
     const queryClient = useQueryClient();
     const user = useAuthStore((state) => state.user);
     const [isContactTyping, setIsContactTyping] = useState(false);
+    const [callHistory, setCallHistory] = useState<CallRecord[]>([]);
+    const bottomRef = useRef<HTMLDivElement | null>(null);
+
+    useEffect(() => {
+        if (!selectedContact?.id) {
+            setCallHistory([]);
+            return;
+        }
+        const key = `call-history-${selectedContact.id}`;
+        const loadHistory = async () => {
+            try {
+                const remoteRecords = await reqGetCallHistory(selectedContact.id);
+                const records = remoteRecords.map((record) => ({
+                    id: record.id,
+                    call_id: record.call_id,
+                    mode: record.mode,
+                    status: record.status,
+                    createdAt: record.created_at,
+                    durationSeconds: record.duration_seconds,
+                    direction: String(record.from_user) === String(user?.id) ? "outgoing" : "incoming",
+                } as CallRecord));
+                setCallHistory(records);
+            } catch {
+                try { setCallHistory(JSON.parse(localStorage.getItem(key) || "[]")); } catch { setCallHistory([]); }
+            }
+        };
+        const handleHistory = (event: Event) => {
+            const detail = (event as CustomEvent<{ contactId: string | number; records: CallRecord[] }>).detail;
+            if (String(detail.contactId) === String(selectedContact.id)) setCallHistory(detail.records);
+        };
+        void loadHistory();
+        window.addEventListener("chat:call_history", handleHistory);
+        return () => window.removeEventListener("chat:call_history", handleHistory);
+    }, [selectedContact?.id]);
 
 
     const {
@@ -47,6 +91,10 @@ export default function ChatWindow() {
         window.addEventListener("chat:key_ready", handleKeyReady);
         return () => window.removeEventListener("chat:key_ready", handleKeyReady);
     }, [queryClient, selectedContact?.id]);
+
+    useEffect(() => {
+        bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+    }, [messages, callHistory, selectedContact?.id]);
 
     useEffect(() => {
         if (!selectedContact?.id) return;
@@ -188,6 +236,7 @@ export default function ChatWindow() {
                                 {attachments.map((attachment) => {
                                     const isImage = attachment.type === "image" || attachment.mime_type?.startsWith("image/");
                                     const isVideo = attachment.type === "video" || attachment.mime_type?.startsWith("video/");
+                                    const isAudio = attachment.type === "audio" || attachment.mime_type?.startsWith("audio/");
 
                                     return isImage ? (
                                         <img
@@ -202,6 +251,15 @@ export default function ChatWindow() {
                                                 objectFit: "cover",
                                             }}
                                         />
+                                    ) : isAudio ? (
+                                        <audio
+                                            key={attachment.id}
+                                            controls
+                                            style={{ maxWidth: 320 }}
+                                        >
+                                            <source src={attachment.url} type={attachment.mime_type} />
+                                            Your browser does not support the audio tag.
+                                        </audio>
                                     ) : isVideo ? (
                                         <video
                                             key={attachment.id}
@@ -273,7 +331,27 @@ export default function ChatWindow() {
                 );
             })}
 
+            {callHistory.slice().reverse().map((record) => {
+                const isIncoming = record.direction === "incoming";
+                const title = record.status === "missed" || (record.status === "failed" && isIncoming) ? "Missed call" : record.status === "incoming" ? "Incoming call" : record.status === "rejected" ? "Rejected call" : record.status === "busy" ? "Busy call" : record.status === "failed" ? "Failed call" : isIncoming ? "Incoming call" : "Outgoing call";
+                const CallIcon = record.mode === "video" ? Video : Phone;
+                return (
+                    <div className={`call-history-card call-history-card--${record.status} call-history-card--${isIncoming ? "incoming" : "outgoing"}`} key={record.id}>
+                        <div className="call-history-card__copy">
+                            <strong>{title}</strong>
+                            <span>
+                                {isIncoming ? <ArrowDownLeft size={15} /> : <ArrowUpRight size={15} />}
+                                {new Date(record.createdAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
+                                {record.durationSeconds !== undefined && `, ${record.durationSeconds} seconds`}
+                            </span>
+                        </div>
+                        <CallIcon className="call-history-card__icon" size={25} />
+                    </div>
+                );
+            })}
+
             {isUploading && <LoadingSpinner progress={uploadProgress} loaded={uploadedBytes} total={uploadTotalBytes} />}
+            <div ref={bottomRef} />
         </div>
     );
 }

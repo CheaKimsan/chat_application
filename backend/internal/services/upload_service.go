@@ -31,12 +31,18 @@ const (
 var allowedExts = map[string]bool{
 	".png": true, ".jpg": true, ".jpeg": true, ".gif": true,
 	".pdf": true, ".txt": true, ".zip": false, ".mp4": true,
+	".webm": true, ".ogg": true, ".wav": true,
 }
 
-func attachmentTypeFromExt(ext string) string {
+func attachmentTypeFromExt(ext, mimeType string) string {
 	switch ext {
 	case ".png", ".jpg", ".jpeg", ".gif":
 		return "image"
+	case ".webm", ".ogg", ".wav":
+		if strings.HasPrefix(mimeType, "video/") {
+			return "video"
+		}
+		return "audio"
 	case ".pdf", ".txt":
 		return "file"
 	case ".mp4":
@@ -99,7 +105,7 @@ func (s *UploadService) saveOne(ctx context.Context, callerID, messageID string,
 		return att, fmt.Errorf("failed to generate download link for %s: %w", header.Filename, err)
 	}
 
-	attType := attachmentTypeFromExt(ext)
+	attType := attachmentTypeFromExt(ext, mimeType)
 
 	att, err = s.attachments.Create(ctx, messageID, attType, fileURL, header.Filename, mimeType, header.Size)
 	if err != nil {

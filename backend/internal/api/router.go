@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"golang-jwt-project/internal/handlers"
@@ -52,7 +53,9 @@ func NewRouter(db *sql.DB, pool *ws.Pool, jwtSecret []byte, refreshSecret []byte
 	}
 
 	corsConfig := cors.DefaultConfig()
-	corsConfig.AllowOrigins = []string{"http://localhost:3000"}
+	corsConfig.AllowOriginFunc = func(origin string) bool {
+		return strings.HasPrefix(origin, "http://localhost:3000") || strings.HasPrefix(origin, "http://127.0.0.1:3000") || strings.HasPrefix(origin, "http://192.168.") || strings.HasPrefix(origin, "http://10.") || strings.HasPrefix(origin, "http://172.")
+	}
 	corsConfig.AllowHeaders = []string{"Origin", "Content-Length", "Content-Type", "Authorization"}
 	corsConfig.AllowMethods = []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"}
 	router.Use(cors.New(corsConfig))
@@ -104,6 +107,8 @@ func NewRouter(db *sql.DB, pool *ws.Pool, jwtSecret []byte, refreshSecret []byte
 
 	messageRepo := repository.NewMessageRepository(db)
 	attachmentRepo := repository.NewAttachmentRepository(db)
+	callHistoryRepo := repository.NewCallHistoryRepository(db)
+	callHistoryHandler := handlers.NewCallHistoryHandler(callHistoryRepo)
 	messageService := services.NewMessageService(messageRepo, pool)
 	uploadService := services.NewUploadService(attachmentRepo, minioStore)
 	messageHandler := handlers.NewMessageHandler(messageService, uploadService, pool)
@@ -121,6 +126,11 @@ func NewRouter(db *sql.DB, pool *ws.Pool, jwtSecret []byte, refreshSecret []byte
 		messages := api.Group("/messages")
 		messages.Use(middleware.AuthMiddleware(jwtSecret))
 		messageHandler.RegisterRoutes(messages)
+
+		calls := api.Group("/calls")
+		calls.Use(middleware.AuthMiddleware(jwtSecret))
+		calls.GET("/:userId", callHistoryHandler.List)
+		calls.POST("", callHistoryHandler.Create)
 
 		// GET /invites/validate is public — the invitee isn't logged in
 		// yet when checking their invite link on the signup page.

@@ -26,6 +26,14 @@ export default function UserMenu({ username, email, onLogout }: UserMenuProps) {
         setProfilePhoto(user?.profile_photo ?? null);
     }, [user?.profile_photo]);
 
+    console.log(user?.profile_photo);
+
+
+    const handleImageError = () => {
+        console.error('Profile photo could not be loaded:', profilePhoto);
+        setProfilePhoto(null);
+    };
+
     const initials = username
         .split(' ')
         .map((part) => part[0]?.toUpperCase())
@@ -112,6 +120,7 @@ export default function UserMenu({ username, email, onLogout }: UserMenuProps) {
                     <img
                         src={profilePhoto}
                         alt="Profile avatar"
+                        onError={handleImageError}
                         style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                     />
                 ) : (
@@ -165,6 +174,7 @@ export default function UserMenu({ username, email, onLogout }: UserMenuProps) {
                                 <img
                                     src={profilePhoto}
                                     alt="Profile avatar"
+                                    onError={handleImageError}
                                     style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                                 />
                             ) : (

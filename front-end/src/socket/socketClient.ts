@@ -52,7 +52,8 @@ export const connectSocket = async (token?: string) => {
 
     const freshToken = await ensureValidAccessToken(token);
 
-    socket = new WebSocket(`ws://localhost:8000/api/v1/messages?token=${freshToken}`);
+    const protocol = window.location.protocol === "https:" ? "wss" : "ws";
+    socket = new WebSocket(`${protocol}://${window.location.hostname}:8000/api/v1/messages?token=${freshToken}`);
 
     socket.onopen = () => console.log("socket connected");
 
@@ -76,6 +77,12 @@ export const connectSocket = async (token?: string) => {
 
         if (payload.type === "key_exchange_failed") {
             failKeyExchange(payload.from_user, payload.reason || "key exchange failed");
+            return;
+        }
+
+        if (["call_offer", "call_answer", "ice_candidate", "call_end", "call_reject", "call_busy", "call_failed"].includes(payload.type)) {
+            console.log("CALL RECEIVE", payload.type, payload.from_user, payload.call_id);
+            emitChatEvent("chat:call", payload);
             return;
         }
 
@@ -185,4 +192,17 @@ export const sendKeyExchangeRequest = (toUser: string) => {
 
 export const sendMarkRead = (fromUserOfMessages: string) => {
     send({ kind: "mark_read", to_user: fromUserOfMessages });
+};
+
+export const sendCallSignal = (signal: {
+    kind: "call_offer" | "call_answer" | "ice_candidate" | "call_end" | "call_reject" | "call_busy";
+    to_user: string;
+    call_id: string;
+    sdp?: string;
+    candidate?: string;
+    sdp_m_line_index?: number | null;
+    sdp_mid?: string | null;
+}) => {
+    console.log("CALL SEND", signal.kind, signal.to_user, signal.call_id);
+    send(signal);
 };

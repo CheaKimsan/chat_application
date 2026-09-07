@@ -8,6 +8,32 @@ interface GetMessagesResponse {
     messages: MessageResponse[];
 }
 
+export interface CallHistoryResponse {
+    id: string;
+    call_id: string;
+    from_user: string;
+    to_user: string;
+    mode: "audio" | "video";
+    status: string;
+    duration_seconds?: number;
+    created_at: string;
+}
+
+export const reqGetCallHistory = async (contactId: string | number): Promise<CallHistoryResponse[]> => {
+    const response = await apiClient.get<{ calls: CallHistoryResponse[] }>(`/calls/${contactId}`);
+    return response.data.calls ?? [];
+};
+
+export const reqCreateCallHistory = async (data: {
+    call_id: string;
+    to_user: string;
+    mode: "audio" | "video";
+    status: string;
+    duration_seconds?: number;
+}) => {
+    await apiClient.post("/calls", data);
+};
+
 export const reqGetMessages = async (contactId: string | number): Promise<MessageResponse[]> => {
 
     const response = await apiClient.get<GetMessagesResponse>(`/messages/${contactId}`);

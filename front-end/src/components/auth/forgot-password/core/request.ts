@@ -1,6 +1,6 @@
 import axios from "axios";
 
-const API_BASE_URL = "http://localhost:8000/api/v1";
+const API_BASE_URL = `${window.location.protocol}//${window.location.hostname}:8000/api/v1`;
 
 async function forgotPasswordRequest(email: string): Promise<void> {
     await axios.post(`${API_BASE_URL}/forgot-password`, { email });

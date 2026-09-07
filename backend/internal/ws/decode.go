@@ -22,6 +22,7 @@ func HandleIncomingSocketMessage(fromUserID string, raw []byte) (Message, error)
 	}
 	kind := strings.TrimSpace(fmt.Sprint(kindValue))
 	toUser, _ := envelope["to_user"].(string)
+	callID, _ := envelope["call_id"].(string)
 
 	switch kind {
 	case "typing":
@@ -82,6 +83,29 @@ func HandleIncomingSocketMessage(fromUserID string, raw []byte) (Message, error)
 			ToUser:    toUser,
 			PublicKey: publicKey,
 		}, nil
+
+	case "call_offer", "call_answer":
+		sdp, _ := envelope["sdp"].(string)
+		if toUser == "" || callID == "" || sdp == "" {
+			return Message{}, fmt.Errorf("%s requires to_user, call_id and sdp", kind)
+		}
+		return Message{Type: kind, FromUser: fromUserID, ToUser: toUser, CallID: callID, SDP: sdp}, nil
+
+	case "ice_candidate":
+		candidate, _ := envelope["candidate"].(string)
+		if toUser == "" || callID == "" || candidate == "" {
+			return Message{}, fmt.Errorf("ice_candidate requires to_user, call_id and candidate")
+		}
+		lineIndex, _ := envelope["sdp_m_line_index"].(float64)
+		mid, _ := envelope["sdp_mid"].(string)
+		line := int(lineIndex)
+		return Message{Type: kind, FromUser: fromUserID, ToUser: toUser, CallID: callID, Candidate: candidate, SDPMLine: &line, SDPMid: mid}, nil
+
+	case "call_end", "call_reject", "call_busy":
+		if toUser == "" || callID == "" {
+			return Message{}, fmt.Errorf("%s requires to_user and call_id", kind)
+		}
+		return Message{Type: kind, FromUser: fromUserID, ToUser: toUser, CallID: callID}, nil
 
 	default:
 		return Message{}, fmt.Errorf("unsupported message kind: %s", kind)

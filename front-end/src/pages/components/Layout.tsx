@@ -9,7 +9,8 @@ import { connectSocket, disconnectSocket, sendTyping } from '../../socket/socket
 import UserMenu from "../../shared/UserMenu";
 import { UserResponse } from "../../components/user/core/model";
 import { reqSendMessage, reqUploadFile } from "../../components/message/core/request";
-import { Lock, MessageCircle, Paperclip, Send } from 'lucide-react';
+import { Camera, Lock, MessageCircle, Mic, Paperclip, Send, Square } from 'lucide-react';
+import CallPanel from '../../components/call/CallPanel';
 
 
 export default function Layout() {
@@ -67,7 +68,36 @@ export default function Layout() {
     const [uploadedBytes, setUploadedBytes] = useState(0);
     const [uploadTotalBytes, setUploadTotalBytes] = useState(0);
     const [uploadFileCount, setUploadFileCount] = useState(0);
+    const [isRecording, setIsRecording] = useState(false);
+    const [isVideoRecording, setIsVideoRecording] = useState(false);
+    const [recordingSeconds, setRecordingSeconds] = useState(0);
+    const [uploadError, setUploadError] = useState<string | null>(null);
     const fileInputRef = useRef<HTMLInputElement | null>(null);
+    const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+    const videoRecorderRef = useRef<MediaRecorder | null>(null);
+    const recordingChunksRef = useRef<Blob[]>([]);
+    const videoChunksRef = useRef<Blob[]>([]);
+    const recordingStartedAtRef = useRef<number | null>(null);
+    const maxRecordingSeconds = 120;
+
+    useEffect(() => {
+        const isRecordingAny = isRecording || isVideoRecording;
+        if (!isRecordingAny) return;
+
+        const timer = window.setInterval(() => {
+            const startedAt = recordingStartedAtRef.current;
+            if (!startedAt) return;
+
+            const elapsed = Math.floor((Date.now() - startedAt) / 1000);
+            setRecordingSeconds(Math.min(elapsed, maxRecordingSeconds));
+            if (elapsed >= maxRecordingSeconds) {
+                if (isVideoRecording) videoRecorderRef.current?.stop();
+                else mediaRecorderRef.current?.stop();
+            }
+        }, 250);
+
+        return () => window.clearInterval(timer);
+    }, [isRecording, isVideoRecording]);
 
 
 
@@ -140,6 +170,7 @@ export default function Layout() {
         const totalSize = files.reduce((sum, f) => sum + f.size, 0);
 
         try {
+            setUploadError(null);
             setIsUploading(true);
             setUploadProgress(0);
             setUploadedBytes(0);
@@ -164,6 +195,11 @@ export default function Layout() {
             queryClient.invalidateQueries({ queryKey: ["messages", selectedContact.id] });
         } catch (err) {
             console.error('Failed to upload file:', err);
+            const responseData = (err as { response?: { data?: { message?: string; errors?: Array<{ error?: string }> } } })
+                .response?.data;
+            const responseMessage = responseData?.errors?.map((failure) => failure.error).filter(Boolean).join(', ')
+                || responseData?.message;
+            setUploadError(responseMessage || (err instanceof Error ? err.message : 'Upload failed.'));
         } finally {
             setIsUploading(false);
             setUploadProgress(0);
@@ -174,49 +210,164 @@ export default function Layout() {
         }
     };
 
+    const handleVoiceMessage = async () => {
+        if (!selectedContact || isUploading || isVideoRecording) return;
+
+        if (isRecording) {
+            mediaRecorderRef.current?.stop();
+            return;
+        }
+
+        if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
+            console.error('Voice recording is not supported by this browser.');
+            return;
+        }
+
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            const recordingType = ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus']
+                .find((type) => MediaRecorder.isTypeSupported(type));
+            if (!recordingType) {
+                stream.getTracks().forEach((track) => track.stop());
+                throw new Error('This browser does not support a compatible audio recording format.');
+            }
+
+            const recorder = new MediaRecorder(stream, { mimeType: recordingType });
+            recordingChunksRef.current = [];
+            mediaRecorderRef.current = recorder;
+
+            recorder.ondataavailable = (event) => {
+                if (event.data.size > 0) recordingChunksRef.current.push(event.data);
+            };
+
+            recorder.onstop = async () => {
+                stream.getTracks().forEach((track) => track.stop());
+                setIsRecording(false);
+                setIsUploading(true);
+                setUploadError(null);
+
+                try {
+                    const audioBlob = new Blob(recordingChunksRef.current, { type: recordingType });
+                    const extension = recordingType.startsWith('audio/ogg') ? 'ogg' : 'webm';
+                    const audioFile = new File([audioBlob], `voice-${Date.now()}.${extension}`, {
+                        type: recordingType,
+                    });
+                    const createdMessage = await sendMutation.mutateAsync({
+                        to_user: String(selectedContact.id),
+                        body: undefined,
+                        encrypted: false,
+                    });
+                    await reqUploadFile(createdMessage.id, [audioFile]);
+                    queryClient.invalidateQueries({ queryKey: ['messages', selectedContact.id] });
+                } catch (err) {
+                    console.error('Failed to send voice message:', err);
+                    const responseData = (err as { response?: { data?: { message?: string; errors?: Array<{ error?: string }> } } })
+                        .response?.data;
+                    const responseMessage = responseData?.errors?.map((failure) => failure.error).filter(Boolean).join(', ')
+                        || responseData?.message;
+                    setUploadError(responseMessage || (err instanceof Error ? err.message : 'Voice message failed to send.'));
+                } finally {
+                    setIsUploading(false);
+                    recordingChunksRef.current = [];
+                    mediaRecorderRef.current = null;
+                }
+            };
+
+            recorder.start();
+            recordingStartedAtRef.current = Date.now();
+            setRecordingSeconds(0);
+            setIsRecording(true);
+        } catch (err) {
+            console.error('Microphone permission was denied or unavailable:', err);
+            setUploadError(err instanceof Error ? err.message : 'Microphone permission was denied.');
+        }
+    };
+
+    const handleVideoMessage = async () => {
+        if (!selectedContact || isUploading) return;
+
+        if (isVideoRecording) {
+            videoRecorderRef.current?.stop();
+            return;
+        }
+
+        if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
+            setUploadError('Video recording is not supported by this browser.');
+            return;
+        }
+
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+            const recordingType = ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm']
+                .find((type) => MediaRecorder.isTypeSupported(type));
+            if (!recordingType) {
+                stream.getTracks().forEach((track) => track.stop());
+                throw new Error('This browser does not support a compatible video recording format.');
+            }
+
+            const recorder = new MediaRecorder(stream, { mimeType: recordingType });
+            videoChunksRef.current = [];
+            videoRecorderRef.current = recorder;
+            recorder.ondataavailable = (event) => {
+                if (event.data.size > 0) videoChunksRef.current.push(event.data);
+            };
+            recorder.onstop = async () => {
+                stream.getTracks().forEach((track) => track.stop());
+                setIsVideoRecording(false);
+                setIsUploading(true);
+                setUploadError(null);
+
+                try {
+                    const videoBlob = new Blob(videoChunksRef.current, { type: recordingType });
+                    const videoFile = new File([videoBlob], `video-${Date.now()}.webm`, { type: recordingType });
+                    const createdMessage = await sendMutation.mutateAsync({
+                        to_user: String(selectedContact.id),
+                        body: undefined,
+                        encrypted: false,
+                    });
+                    await reqUploadFile(createdMessage.id, [videoFile]);
+                    queryClient.invalidateQueries({ queryKey: ['messages', selectedContact.id] });
+                } catch (err) {
+                    console.error('Failed to send video message:', err);
+                    const responseData = (err as { response?: { data?: { message?: string; errors?: Array<{ error?: string }> } } })
+                        .response?.data;
+                    const responseMessage = responseData?.errors?.map((failure) => failure.error).filter(Boolean).join(', ')
+                        || responseData?.message;
+                    setUploadError(responseMessage || (err instanceof Error ? err.message : 'Video message failed to send.'));
+                } finally {
+                    setIsUploading(false);
+                    videoChunksRef.current = [];
+                    videoRecorderRef.current = null;
+                }
+            };
+            recorder.start();
+            recordingStartedAtRef.current = Date.now();
+            setRecordingSeconds(0);
+            setIsVideoRecording(true);
+        } catch (err) {
+            console.error('Camera or microphone permission was denied:', err);
+            setUploadError(err instanceof Error ? err.message : 'Camera permission was denied.');
+        }
+    };
+
     const handleSelectContact = (u: UserResponse) => {
         stopTyping();
         setSelectedContact(u);
     };
 
     return (
-        <div style={{ display: 'flex', height: '100vh', background: '#0B0C0D', overflow: 'hidden' }}>
-            <style>{`
-                @keyframes spin {
-                    0% { transform: rotate(0deg); }
-                    100% { transform: rotate(360deg); }
-                }
-            `}</style>
+        <div className="layout-shell">
             <Sidebar onSelectContact={handleSelectContact} />
 
-            <main style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, height: '100vh', overflow: 'hidden' }}>
+            <main className="layout-main">
                 {selectedContact && <ChatHeader contact={contact} isTyping={isTyping} />}
+                <CallPanel contactId={selectedContact?.id} />
 
-                <div
-                    style={{
-                        position: 'absolute',
-                        top: 12,
-                        right: 16,
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 8,
-                    }}
-                >
-                    <div
-                        style={{
-                            position: 'absolute',
-                            top: 12,
-                            right: 16,
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: 8,
-                        }}
-                    >
-                        {user && <UserMenu username={user.username} email={user.email} onLogout={handleLogout} />}
-                    </div>
+                <div className="layout-user-menu">
+                    {user && <UserMenu username={user.username} email={user.email} onLogout={handleLogout} />}
                 </div>
-                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, overflow: 'hidden' }}>
-                    <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', minHeight: 0 }}>
+                <div className="layout-content">
+                    <div className="layout-scroll">
                         <Outlet context={{
                             outletInput,
                             setOutletInput,
@@ -235,26 +386,21 @@ export default function Layout() {
                                 e.preventDefault();
                                 handleSend();
                             }}
-                            style={{ display: 'flex', gap: 8, padding: 12, borderTop: '1px solid #161719', background: '#070809' }}
+                            className="chat-composer"
                         >
+
+                            {uploadError && (
+                                <div className="upload-error">
+                                    {uploadError}
+                                </div>
+                            )}
 
                             <button
                                 type="button"
                                 onClick={() => setIsEncrypted(!isEncrypted)}
                                 disabled={!selectedContact || sendMutation.isPending}
                                 title={isEncrypted ? 'Encrypted chat' : 'Normal chat'}
-                                style={{
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                    width: 40,
-                                    height: 40,
-                                    borderRadius: 6,
-                                    border: '1px solid #2A2D32',
-                                    background: '#101317',
-                                    color: '#E7E3DA',
-                                    cursor: selectedContact ? 'pointer' : 'not-allowed',
-                                }}
+                                className="composer-icon-button"
                             >
                                 {isEncrypted ? (
                                     <Lock size={18} />
@@ -269,41 +415,57 @@ export default function Layout() {
                                 hidden
                                 multiple
                                 onChange={handleFileSelect}
-                                accept="image/*,.pdf,.txt,.mp4"
+                                accept="image/*,.pdf,.txt,.mp4,audio/*"
                             />
 
                             <button
                                 type="button"
                                 onClick={() => fileInputRef.current?.click()}
-                                disabled={!selectedContact || isUploading}
-                                style={{
-                                    padding: '10px 14px',
-                                    borderRadius: 6,
-                                    border: '1px solid #2A2D32',
-                                    background: '#101317',
-                                    color: '#E7E3DA',
-                                    cursor: selectedContact && !isUploading ? 'pointer' : 'not-allowed',
-                                    fontWeight: 600,
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    gap: 6,
-                                    opacity: isUploading ? 0.7 : 1,
-                                }}
+                                disabled={!selectedContact || isUploading || isRecording || isVideoRecording}
+                                className="composer-file-button"
                             >
                                 {isUploading ? (
                                     <>
-                                        <div style={{
-                                            width: 14,
-                                            height: 14,
-                                            border: '2px solid #666',
-                                            borderTop: '2px solid #4F46E5',
-                                            borderRadius: '50%',
-                                            animation: 'spin 0.8s linear infinite',
-                                        }} />
+                                        <div className="upload-spinner" />
                                         Uploading...
                                     </>
                                 ) : <Paperclip size={16} />}
                             </button>
+
+                            <button
+                                type="button"
+                                onClick={handleVoiceMessage}
+                                disabled={!selectedContact || isUploading || isVideoRecording}
+                                title={isRecording ? 'Stop recording' : 'Record voice message'}
+                                className={`recording-button${isRecording ? ' recording-button--active' : ''}`}
+                            >
+                                {isRecording ? <Square size={16} /> : <Mic size={18} />}
+                            </button>
+
+                            <button
+                                type="button"
+                                onClick={handleVideoMessage}
+                                disabled={!selectedContact || isUploading || isRecording}
+                                title={isVideoRecording ? 'Stop video recording' : 'Record video message'}
+                                className={`recording-button${isVideoRecording ? ' recording-button--active' : ''}`}
+                            >
+                                {isVideoRecording ? <Square size={16} /> : <Camera size={18} />}
+                            </button>
+
+                            {(isRecording || isVideoRecording) && (
+                                <div className="recording-timeline">
+                                    <span className="recording-timeline__time">
+                                        {String(Math.floor(recordingSeconds / 60)).padStart(2, '0')}:{String(recordingSeconds % 60).padStart(2, '0')}
+                                    </span>
+                                    <div className="recording-timeline__track">
+                                        <div
+                                            className="recording-timeline__progress"
+                                            style={{ width: `${(recordingSeconds / maxRecordingSeconds) * 100}%` }}
+                                        />
+                                    </div>
+                                    <span className="recording-timeline__hint">Stop to send</span>
+                                </div>
+                            )}
 
                             <input
                                 type="text"
@@ -311,20 +473,12 @@ export default function Layout() {
                                 onChange={handleInputChange}
                                 placeholder="Type here..."
                                 disabled={!selectedContact}
-                                style={{ flex: 1, padding: 10, borderRadius: 6, border: '1px solid #222', background: '#0B0C0D', color: '#fff' }}
+                                className="composer-text-input"
                             />
                             <button
                                 type="submit"
                                 disabled={!outletInput.trim() || !selectedContact || sendMutation.isPending}
-                                style={{
-                                    padding: '10px 16px',
-                                    borderRadius: 6,
-                                    border: 'none',
-                                    background: outletInput.trim() && selectedContact ? '#4F46E5' : '#2A2D32',
-                                    color: '#fff',
-                                    cursor: outletInput.trim() && selectedContact ? 'pointer' : 'not-allowed',
-                                    fontWeight: 600,
-                                }}
+                                className={`composer-send-button${outletInput.trim() && selectedContact ? ' composer-send-button--ready' : ''}`}
                             >
                                 {sendMutation.isPending ? 'Sending...' : <Send size={16} />}
                             </button>

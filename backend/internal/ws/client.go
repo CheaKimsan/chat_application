@@ -3,6 +3,7 @@ package ws
 import (
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 
 	"github.com/gorilla/websocket"
@@ -41,6 +42,9 @@ func (c *Client) Read() {
 
 		if msg.ToUser != "" {
 			delivered := c.Pool.SendToUser(msg.ToUser, msg)
+			if strings.HasPrefix(msg.Type, "call_") || msg.Type == "ice_candidate" {
+				log.Printf("call signal %s from %s to %s delivered=%t call_id=%s", msg.Type, msg.FromUser, msg.ToUser, delivered, msg.CallID)
+			}
 
 			// Let the sender know their key exchange couldn't reach an offline peer,
 			// so the UI can show something useful instead of silently hanging.
@@ -49,6 +53,15 @@ func (c *Client) Read() {
 					Type:     "key_exchange_failed",
 					FromUser: msg.ToUser,
 					ToUser:   c.ID,
+					Reason:   "user is offline",
+				})
+			}
+			if !delivered && strings.HasPrefix(msg.Type, "call_") {
+				c.Pool.SendToUser(c.ID, Message{
+					Type:     "call_failed",
+					FromUser: msg.ToUser,
+					ToUser:   c.ID,
+					CallID:   msg.CallID,
 					Reason:   "user is offline",
 				})
 			}

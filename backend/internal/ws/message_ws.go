@@ -3,7 +3,7 @@ package ws
 import "time"
 
 type Message struct {
-	Type        string       `json:"type"`         // "new_message" | "typing" | "message_read" | "key_exchange_request" | "key_exchange_response" | "key_exchange_failed"
+	Type        string       `json:"type"`         // chat, key exchange, and WebRTC call signaling
 	ID          string       `json:"id,omitempty"` // DB id, once persisted
 	FromUser    string       `json:"from_user"`
 	ToUser      string       `json:"to_user,omitempty"`
@@ -13,6 +13,11 @@ type Message struct {
 	CreatedAt   *time.Time   `json:"created_at,omitempty"`
 	PublicKey   string       `json:"public_key,omitempty"` // used by key_exchange_request/response
 	Reason      string       `json:"reason,omitempty"`     // used by key_exchange_failed
+	CallID      string       `json:"call_id,omitempty"`
+	SDP         string       `json:"sdp,omitempty"`
+	Candidate   string       `json:"candidate,omitempty"`
+	SDPMLine    *int         `json:"sdp_m_line_index,omitempty"`
+	SDPMid      string       `json:"sdp_mid,omitempty"`
 }
 
 type Attachment struct {
