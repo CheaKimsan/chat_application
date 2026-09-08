@@ -25,9 +25,16 @@ interface SendMessageRequest {
     encrypted?: boolean;
 }
 
+interface EditMessageRequest {
+    messageId: string;
+    body: string;
+    contactId: string;
+}
+
 export type {
     AttachmentResponse,
     SendMessageRequest,
+    EditMessageRequest,
     MessageResponse
 }
 

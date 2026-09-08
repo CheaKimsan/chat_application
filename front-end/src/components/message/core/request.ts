@@ -51,8 +51,12 @@ export const reqGetMessages = async (contactId: string | number): Promise<Messag
         sharedKey = undefined;
     }
 
+    const sortedMessages = [...rawMessages].sort(
+        (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+    );
+
     const decrypted = await Promise.all(
-        rawMessages.map(async (m) => {
+        sortedMessages.map(async (m) => {
             if (!m.body) {
                 return { ...m, body: "" };
             }
@@ -128,4 +132,18 @@ export const reqUploadFile = async (
     );
 
     return response.data;
+};
+
+export const reqEditMessage = async (data: { messageId: string; body: string; contactId: string }) => {
+    const sharedKey = await waitForSharedKey(data.contactId, () => sendKeyExchangeRequest(data.contactId));
+    const { ciphertext, nonce } = await encryptMessage(sharedKey, data.body);
+    const response = await apiClient.patch<{ message: MessageResponse }>(
+        `/messages/${data.messageId}/edit`,
+        { ciphertext, nonce }
+    );
+    return { ...response.data.message, body: data.body };
+};
+
+export const reqDeleteMessage = async (messageId: string) => {
+    await apiClient.delete(`/messages/${messageId}`);
 };

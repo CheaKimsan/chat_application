@@ -87,6 +87,27 @@ func (r *MessageRepository) Create(ctx context.Context, fromUser, toUser string,
 	return msg, nil
 }
 
+func (r *MessageRepository) Update(ctx context.Context, messageID, fromUser string, ciphertext, nonce *string) (models.MessageResponse, string, error) {
+	var msg models.MessageResponse
+	err := r.db.QueryRowContext(ctx,
+		`UPDATE messages
+		 SET body = $1, nonce = $2
+		 WHERE id = $3 AND from_user = $4
+		 RETURNING id, from_user, to_user, body, nonce, created_at, read_at`,
+		ciphertext, nonce, messageID, fromUser,
+	).Scan(&msg.ID, &msg.FromUser, &msg.ToUser, &msg.Body, &msg.Nonce, &msg.CreatedAt, &msg.ReadAt)
+	return msg, msg.ToUser, err
+}
+
+func (r *MessageRepository) Delete(ctx context.Context, messageID, fromUser string) (string, error) {
+	var toUser string
+	err := r.db.QueryRowContext(ctx,
+		`DELETE FROM messages WHERE id = $1 AND from_user = $2 RETURNING to_user`,
+		messageID, fromUser,
+	).Scan(&toUser)
+	return toUser, err
+}
+
 // MarkRead marks the message as read if it belongs to callerID and hasn't
 // been read yet, returning the sender's id. Returns sql.ErrNoRows (unwrapped)
 // if the message doesn't exist, isn't addressed to callerID, or is already read.

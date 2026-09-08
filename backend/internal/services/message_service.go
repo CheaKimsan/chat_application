@@ -30,6 +30,24 @@ func (s *MessageService) Send(ctx context.Context, fromUser string, req models.S
 	return msg, nil
 }
 
+func (s *MessageService) Update(ctx context.Context, fromUser, messageID string, req models.EditMessageRequest) (models.MessageResponse, error) {
+	msg, toUser, err := s.messages.Update(ctx, messageID, fromUser, req.Ciphertext, req.Nonce)
+	if err != nil {
+		return models.MessageResponse{}, err
+	}
+	s.pool.SendToUser(toUser, map[string]interface{}{"type": "message_updated", "message": msg})
+	return msg, nil
+}
+
+func (s *MessageService) Delete(ctx context.Context, fromUser, messageID string) error {
+	toUser, err := s.messages.Delete(ctx, messageID, fromUser)
+	if err != nil {
+		return err
+	}
+	s.pool.SendToUser(toUser, map[string]interface{}{"type": "message_deleted", "message_id": messageID})
+	return nil
+}
+
 // MarkRead marks the message read and notifies the sender over the socket.
 // The returned error is sql.ErrNoRows (unwrapped) when the message doesn't
 // exist, isn't addressed to callerID, or is already read — callers should

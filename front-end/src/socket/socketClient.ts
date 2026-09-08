@@ -106,6 +106,23 @@ export const connectSocket = async (token?: string) => {
                 emitChatEvent("chat:new_message", { ...msg, plaintext: null, decryptError: (err as Error).message });
             }
         }
+        if (payload.type === "message_updated") {
+            const msg = payload.message;
+            try {
+                const sharedKey = await waitForSharedKey(msg.from_user, () =>
+                    send({ kind: "key_exchange_request", to_user: msg.from_user })
+                );
+                const plaintext = msg.nonce
+                    ? await decryptMessage(sharedKey, msg.body, msg.nonce)
+                    : msg.body || "";
+                emitChatEvent("chat:message_updated", { ...msg, plaintext });
+            } catch (err) {
+                emitChatEvent("chat:message_updated", { ...msg, plaintext: null, decryptError: (err as Error).message });
+            }
+        }
+        if (payload.type === "message_deleted") {
+            emitChatEvent("chat:message_deleted", payload);
+        }
         if (payload.type === "new_attachment") {
             emitChatEvent("chat:new_attachment", payload.attachment);
         }

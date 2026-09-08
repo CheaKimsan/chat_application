@@ -43,7 +43,10 @@ export default function CallPanel({ contactId }: CallPanelProps) {
     const [callerId, setCallerId] = useState<string | null>(null);
     const [isMuted, setIsMuted] = useState(false);
     const [isCameraOff, setIsCameraOff] = useState(false);
+    const [isFullscreen, setIsFullscreen] = useState(false);
+    const [networkQuality, setNetworkQuality] = useState<"excellent" | "good" | "fair" | "poor">("good");
     const [statusMessage, setStatusMessage] = useState<string | null>(null);
+    const callStateRef = useRef<"idle" | "calling" | "incoming" | "connected">("idle");
     const peerRef = useRef<RTCPeerConnection | null>(null);
     const localStreamRef = useRef<MediaStream | null>(null);
     const localVideoRef = useRef<HTMLVideoElement | null>(null);
@@ -54,6 +57,7 @@ export default function CallPanel({ contactId }: CallPanelProps) {
     const remoteStreamRef = useRef<MediaStream | null>(null);
     const callStartedAtRef = useRef<number | null>(null);
     const callTimeoutRef = useRef<number | null>(null);
+    const qualityTimerRef = useRef<number | null>(null);
 
     const addHistory = (status: CallStatus, mode: CallMode, durationSeconds?: number, direction: "incoming" | "outgoing" = "outgoing") => {
         if (!contactId) return;
@@ -85,6 +89,45 @@ export default function CallPanel({ contactId }: CallPanelProps) {
         callStartedAtRef.current = null;
     };
 
+    const updateNetworkQuality = async () => {
+        const peer = peerRef.current;
+        if (!peer) return;
+
+        const stats = await peer.getStats();
+        const statEntries = Array.from(stats.values());
+        let rttMs = 0;
+        let packetLoss = 0;
+        let packetTotal = 0;
+
+        for (const stat of statEntries) {
+            if (stat.type === "candidate-pair" && stat.state === "succeeded") {
+                if (typeof stat.currentRoundTripTime === "number") {
+                    rttMs = stat.currentRoundTripTime * 1000;
+                }
+            }
+
+            if (stat.type === "inbound-rtp") {
+                packetLoss += Number(stat.packetsLost ?? 0);
+                packetTotal += Number(stat.packetsReceived ?? 0);
+            }
+
+            if (stat.type === "outbound-rtp") {
+                packetLoss += Number(stat.packetsLost ?? 0);
+            }
+        }
+
+        const lossPercent = packetTotal > 0 ? (packetLoss / Math.max(1, packetLoss + packetTotal)) * 100 : 0;
+
+        if (rttMs < 120 && lossPercent < 1) setNetworkQuality("excellent");
+        else if (rttMs < 220 && lossPercent < 3) setNetworkQuality("good");
+        else if (rttMs < 400 && lossPercent < 8) setNetworkQuality("fair");
+        else setNetworkQuality("poor");
+    };
+
+    useEffect(() => {
+        callStateRef.current = callState;
+    }, [callState]);
+
     const clearCall = () => {
         localStreamRef.current?.getTracks().forEach((track) => track.stop());
         peerRef.current?.close();
@@ -93,6 +136,8 @@ export default function CallPanel({ contactId }: CallPanelProps) {
         activeCallIdRef.current = null;
         if (callTimeoutRef.current) window.clearTimeout(callTimeoutRef.current);
         callTimeoutRef.current = null;
+        if (qualityTimerRef.current) window.clearInterval(qualityTimerRef.current);
+        qualityTimerRef.current = null;
         remoteStreamRef.current = null;
         pendingOfferRef.current = null;
         pendingCandidatesRef.current = [];
@@ -103,6 +148,8 @@ export default function CallPanel({ contactId }: CallPanelProps) {
         setCallerId(null);
         setIsMuted(false);
         setIsCameraOff(false);
+        setIsFullscreen(false);
+        setNetworkQuality("good");
     };
 
     const createPeer = (targetUser: string, currentCallId: string, mode: CallMode) => {
@@ -123,10 +170,23 @@ export default function CallPanel({ contactId }: CallPanelProps) {
             if (remoteVideoRef.current) remoteVideoRef.current.srcObject = remoteStreamRef.current;
         };
         peer.onconnectionstatechange = () => {
-            if (["failed", "closed", "disconnected"].includes(peer.connectionState)) clearCall();
+            if (["failed", "closed"].includes(peer.connectionState)) {
+                clearCall();
+                return;
+            }
+
+            if (peer.connectionState === "disconnected") {
+                setStatusMessage("Connection unstable, retrying...");
+            }
         };
         peerRef.current = peer;
         setCallMode(mode);
+
+        if (qualityTimerRef.current) window.clearInterval(qualityTimerRef.current);
+        qualityTimerRef.current = window.setInterval(() => {
+            void updateNetworkQuality();
+        }, 2000);
+
         return peer;
     };
 
@@ -157,11 +217,12 @@ export default function CallPanel({ contactId }: CallPanelProps) {
             sendCallSignal({ kind: "call_offer", to_user: targetUser, call_id: currentCallId, sdp: offer.sdp ?? "" });
             callTimeoutRef.current = window.setTimeout(() => {
                 if (activeCallIdRef.current !== currentCallId) return;
+                if (callStateRef.current !== "calling") return;
                 sendCallSignal({ kind: "call_end", to_user: targetUser, call_id: currentCallId });
                 finishHistory("failed", mode);
                 setStatusMessage("Call failed: no answer");
                 clearCall();
-            }, 15000);
+            }, 30000);
         } catch (error) {
             console.error("Could not start call:", error);
             clearCall();
@@ -289,30 +350,66 @@ export default function CallPanel({ contactId }: CallPanelProps) {
         return (
             <div className="call-panel-wrapper">
                 <div className="call-actions">
-                    <button type="button" className="call-action-button" title="Start audio call" onClick={() => startCall("audio")}><Phone size={16} /></button>
-                    <button type="button" className="call-action-button" title="Start video call" onClick={() => startCall("video")}><Video size={16} /></button>
+                    <button type="button" className="call-action-button call-action-button--ghost" title="Start audio call" onClick={() => startCall("audio")}>
+                        <Phone size={16} />
+                        <span>Audio</span>
+                    </button>
+                    <button type="button" className="call-action-button call-action-button--primary" title="Start video call" onClick={() => startCall("video")}>
+                        <Video size={16} />
+                        <span>Video</span>
+                    </button>
                 </div>
                 {statusMessage && <div className="call-status-message">{statusMessage}</div>}
             </div>
         );
     }
 
+    const toggleFullscreen = () => {
+        setIsFullscreen((current) => !current);
+    };
+
     return (
-        <section className="call-panel">
+        <section className={`call-panel${isFullscreen ? " call-panel--fullscreen" : ""}`}>
             {callState === "incoming" ? (
-                <div className="call-incoming">
-                    <span>{incomingMode === "video" ? "Incoming video call" : "Incoming audio call"}</span>
-                    <button type="button" className="call-action-button call-action-button--accept" onClick={acceptCall} title="Accept call"><Phone size={16} /></button>
-                    <button type="button" className="call-action-button call-action-button--reject" onClick={rejectCall} title="Reject call"><PhoneOff size={16} /></button>
+                <div className="call-incoming-card">
+                    <div className="call-header-row">
+                        <div className="call-avatar-badge">
+                            {incomingMode === "video" ? <Video size={18} /> : <Phone size={18} />}
+                        </div>
+                        <div className="call-header-copy">
+                            <span className="call-tag">Incoming</span>
+                            <strong>{incomingMode === "video" ? "Video call" : "Audio call"}</strong>
+                        </div>
+                    </div>
+                    <div className="call-action-row">
+                        <button type="button" className="call-action-button call-action-button--accept" onClick={(event) => { event.stopPropagation(); void acceptCall(); }} title="Accept call"><Phone size={18} /></button>
+                        <button type="button" className="call-action-button call-action-button--reject" onClick={(event) => { event.stopPropagation(); rejectCall(); }} title="Reject call"><PhoneOff size={18} /></button>
+                    </div>
                 </div>
             ) : (
-                <div className="call-active">
-                    <video ref={(element) => { remoteVideoRef.current = element; if (element && remoteStreamRef.current) element.srcObject = remoteStreamRef.current; }} autoPlay playsInline className="call-remote-video" />
-                    <video ref={(element) => { localVideoRef.current = element; if (element && localStreamRef.current) element.srcObject = localStreamRef.current; }} autoPlay muted playsInline className={`call-local-video${callMode === "audio" ? " call-local-video--audio" : ""}`} />
-                    <span>{callState === "calling" ? "Calling..." : "Connected"}</span>
-                    <button type="button" className="call-action-button" onClick={() => { localStreamRef.current?.getAudioTracks().forEach((track) => { track.enabled = isMuted; }); setIsMuted(!isMuted); }} title="Toggle microphone">{isMuted ? <MicOff size={16} /> : <Mic size={16} />}</button>
-                    {callMode === "video" && <button type="button" className="call-action-button" onClick={() => { localStreamRef.current?.getVideoTracks().forEach((track) => { track.enabled = isCameraOff; }); setIsCameraOff(!isCameraOff); }} title="Toggle camera">{isCameraOff ? <VideoOff size={16} /> : <Camera size={16} />}</button>}
-                    <button type="button" className="call-action-button call-action-button--reject" onClick={endCall} title="End call"><PhoneOff size={16} /></button>
+                <div className="call-active-card">
+                    <div className="call-video-stage">
+                        <video ref={(element) => { remoteVideoRef.current = element; if (element && remoteStreamRef.current) element.srcObject = remoteStreamRef.current; }} autoPlay playsInline className="call-remote-video" />
+                        <video ref={(element) => { localVideoRef.current = element; if (element && localStreamRef.current) element.srcObject = localStreamRef.current; }} autoPlay muted playsInline className={`call-local-video${callMode === "audio" ? " call-local-video--audio" : ""}`} />
+                        <div className="call-badge">{callState === "calling" ? "Calling" : "Connected"}</div>
+                        <div className="call-type-chip">{callMode === "video" ? "Video call" : "Audio call"}</div>
+                        <div className={`call-quality-badge call-quality-badge--${networkQuality}`}>
+                            {networkQuality.charAt(0).toUpperCase() + networkQuality.slice(1)}
+                        </div>
+                        <button
+                            type="button"
+                            className="call-fullscreen-button"
+                            onClick={(event) => { event.stopPropagation(); toggleFullscreen(); }}
+                            title={isFullscreen ? "Exit fullscreen" : "Full screen"}
+                        >
+                            {isFullscreen ? "Exit full" : "Full screen"}
+                        </button>
+                    </div>
+                    <div className="call-action-row">
+                        <button type="button" className="call-action-button call-action-button--muted" onClick={(event) => { event.stopPropagation(); localStreamRef.current?.getAudioTracks().forEach((track) => { track.enabled = isMuted; }); setIsMuted(!isMuted); }} title="Toggle microphone">{isMuted ? <MicOff size={18} /> : <Mic size={18} />}</button>
+                        {callMode === "video" && <button type="button" className="call-action-button call-action-button--muted" onClick={(event) => { event.stopPropagation(); localStreamRef.current?.getVideoTracks().forEach((track) => { track.enabled = isCameraOff; }); setIsCameraOff(!isCameraOff); }} title="Toggle camera">{isCameraOff ? <VideoOff size={18} /> : <Camera size={18} />}</button>}
+                        <button type="button" className="call-action-button call-action-button--reject" onClick={(event) => { event.stopPropagation(); endCall(); }} title="End call"><PhoneOff size={18} /></button>
+                    </div>
                 </div>
             )}
         </section>

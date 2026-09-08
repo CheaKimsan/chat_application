@@ -33,8 +33,43 @@ func (h *MessageHandler) RegisterRoutes(router *gin.RouterGroup) {
 	router.GET("", h.Websocket)
 	router.GET("/:userId", h.GetConversation)
 	router.POST("/send", h.Send)
+	router.PATCH("/:id/edit", h.Edit)
+	router.DELETE("/:id", h.Delete)
 	router.PATCH("/:id/read", h.MarkRead)
 	router.POST("/:messageId/upload", h.Upload)
+}
+
+func (h *MessageHandler) Edit(c *gin.Context) {
+	callerID, _ := middleware.CallerFromContext(c)
+	var req models.EditMessageRequest
+	if err := c.ShouldBindJSON(&req); err != nil || req.Ciphertext == nil || req.Nonce == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "ciphertext and nonce are required"})
+		return
+	}
+
+	msg, err := h.messages.Update(c.Request.Context(), callerID, c.Param("id"), req)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			c.JSON(http.StatusNotFound, gin.H{"message": "message not found or not owned by you"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"message": "failed to edit message"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": msg})
+}
+
+func (h *MessageHandler) Delete(c *gin.Context) {
+	callerID, _ := middleware.CallerFromContext(c)
+	if err := h.messages.Delete(c.Request.Context(), callerID, c.Param("id")); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			c.JSON(http.StatusNotFound, gin.H{"message": "message not found or not owned by you"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"message": "failed to delete message"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "message deleted"})
 }
 
 func (h *MessageHandler) Websocket(c *gin.Context) {

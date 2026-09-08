@@ -11,6 +11,11 @@ type SendMessageRequest struct {
 	Nonce      *string `json:"nonce"`
 }
 
+type EditMessageRequest struct {
+	Ciphertext *string `json:"ciphertext"`
+	Nonce      *string `json:"nonce"`
+}
+
 type MessageResponse struct {
 	ID          string          `json:"id"`
 	FromUser    string          `json:"from_user"`

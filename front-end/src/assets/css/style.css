@@ -38,6 +38,66 @@
     min-height: 0;
 }
 
+.chat-date-divider {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 12px 0 4px;
+    color: #8b92a0;
+    font-size: 11px;
+    font-weight: 600;
+    justify-content: center;
+}
+
+.chat-date-divider::before,
+.chat-date-divider::after {
+    content: "";
+    width: min(120px, 18%);
+    height: 1px;
+    background: #24282d;
+}
+
+.message-actions {
+    display: flex;
+    gap: 6px;
+    margin-top: 2px;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 150ms ease;
+}
+
+.message-entry:hover .message-actions,
+.message-entry:focus-within .message-actions {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.message-bubble {
+    position: relative;
+}
+
+.message-action-button {
+    display: inline-flex;
+    align-items: center;
+    width: 28px;
+    height: 26px;
+    justify-content: center;
+    padding: 0;
+    border: 1px solid #39424c;
+    border-radius: 5px;
+    background: #17202a;
+    color: #d9e2ec;
+    cursor: pointer;
+}
+
+.message-action-button:hover {
+    background: #263544;
+}
+
+.message-action-button--delete {
+    color: #ffb4b4;
+}
+
 .chat-composer {
     position: relative;
     display: flex;
@@ -177,14 +237,14 @@
 .call-actions {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
 }
 
 .call-panel-wrapper {
     position: relative;
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
 }
 
 .call-status-message {
@@ -263,72 +323,258 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 34px;
-    height: 34px;
-    padding: 0;
-    border: 1px solid #2a2d32;
-    border-radius: 50%;
+    gap: 8px;
+    min-height: 38px;
+    padding: 0 14px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 999px;
     background: #101317;
     color: #e7e3da;
     cursor: pointer;
+    transition: transform 150ms ease, background 150ms ease, border-color 150ms ease;
 }
 
-.call-action-button:hover { background: #252a31; }
-.call-action-button--accept { background: #166534; }
-.call-action-button--reject { background: #991b1b; }
+.call-action-button:hover {
+    transform: translateY(-1px);
+    background: #1d242b;
+}
+
+.call-action-button span {
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+}
+
+.call-action-button--ghost {
+    background: rgba(16, 19, 23, 0.9);
+    border-color: rgba(255, 255, 255, 0.08);
+}
+
+.call-action-button--primary {
+    background: linear-gradient(180deg, #1ea6ff 0%, #1185d0 100%);
+    border-color: rgba(160, 214, 255, 0.45);
+}
+
+.call-action-button--accept {
+    background: linear-gradient(180deg, #1fbf75 0%, #0f9a57 100%);
+    border-color: rgba(117, 224, 166, 0.78);
+}
+
+.call-action-button--muted {
+    background: rgba(255, 255, 255, 0.06);
+}
+
+.call-action-button--reject {
+    background: linear-gradient(180deg, #ef4d5c 0%, #c92d3c 100%);
+    border-color: rgba(255, 164, 176, 0.8);
+}
 
 .call-panel {
     position: fixed;
     z-index: 20;
     top: 58px;
     right: 16px;
-    min-width: 260px;
-    padding: 10px;
-    border: 1px solid #2a2d32;
-    border-radius: 8px;
-    background: #101317;
+    width: min(320px, calc(100vw - 32px));
+    padding: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 18px;
+    background: rgba(12, 15, 19, 0.96);
     color: #fff;
-    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+    box-shadow: 0 16px 42px rgba(0, 0, 0, 0.38);
+    backdrop-filter: blur(10px);
+    cursor: pointer;
+    transition: all 180ms ease;
 }
 
-.call-incoming,
-.call-active {
+.call-panel--fullscreen {
+    top: 0;
+    right: 0;
+    width: 100vw;
+    height: 100vh;
+    padding: 18px;
+    border-radius: 0;
+    background: rgba(3, 6, 10, 0.98);
+    box-shadow: none;
+}
+
+.call-incoming-card,
+.call-active-card {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.call-header-row {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 10px;
+    padding: 2px 2px 0;
 }
 
-.call-incoming span,
-.call-active span {
+.call-avatar-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 42px;
+    height: 42px;
+    border-radius: 14px;
+    background: linear-gradient(180deg, #1e9bf6 0%, #1b79d2 100%);
+    color: #fff;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.24);
+}
+
+.call-header-copy {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.call-tag {
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #8ea7c2;
+}
+
+.call-header-copy strong {
+    font-size: 18px;
+    line-height: 1.2;
+}
+
+.call-action-row {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+}
+
+.call-video-stage {
+    position: relative;
+    overflow: hidden;
+    border-radius: 14px;
+    background: linear-gradient(180deg, #0a0d12 0%, #0f1723 100%);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.call-panel--fullscreen .call-video-stage {
     flex: 1;
-    font-size: 13px;
+    min-height: 72vh;
+    border-radius: 22px;
 }
 
-.call-active { position: relative; flex-wrap: wrap; }
+.call-panel--fullscreen .call-active-card {
+    height: calc(100vh - 36px);
+    justify-content: center;
+}
+
+.call-panel--fullscreen .call-action-row {
+    justify-content: center;
+    padding-bottom: 8px;
+}
 
 .call-remote-video {
-    width: 240px;
-    height: 160px;
+    width: 100%;
+    height: 184px;
     display: block;
-    border-radius: 6px;
+    border-radius: 14px;
     background: #050607;
     object-fit: cover;
+}
+
+.call-panel--fullscreen .call-remote-video {
+    height: 100%;
 }
 
 .call-local-video {
     position: absolute;
-    top: 8px;
-    right: 8px;
-    width: 72px;
-    height: 52px;
-    border: 1px solid #fff;
-    border-radius: 4px;
+    top: 10px;
+    right: 10px;
+    width: 84px;
+    height: 108px;
+    border: 2px solid rgba(255, 255, 255, 0.92);
+    border-radius: 12px;
     background: #050607;
     object-fit: cover;
+    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.35);
 }
 
 .call-local-video--audio { display: none; }
 
+.call-badge,
+.call-type-chip,
+.call-quality-badge {
+    position: absolute;
+    left: 12px;
+    padding: 5px 8px;
+    border-radius: 999px;
+    background: rgba(7, 11, 14, 0.72);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    font-size: 11px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: #e5edf8;
+}
+
+.call-badge {
+    top: 12px;
+}
+
+.call-type-chip {
+    bottom: 12px;
+    left: 12px;
+    background: rgba(23, 152, 125, 0.16);
+    border-color: rgba(86, 243, 182, 0.2);
+    color: #9ef2ca;
+}
+
+.call-quality-badge {
+    top: 12px;
+    right: 12px;
+    left: auto;
+    font-weight: 700;
+}
+
+.call-quality-badge--excellent { background: rgba(18, 144, 92, 0.18); border-color: rgba(88, 239, 161, 0.24); color: #a9f3c4; }
+.call-quality-badge--good { background: rgba(59, 130, 246, 0.16); border-color: rgba(96, 165, 250, 0.24); color: #bfdbfe; }
+.call-quality-badge--fair { background: rgba(234, 179, 8, 0.16); border-color: rgba(253, 224, 71, 0.22); color: #fde68a; }
+.call-quality-badge--poor { background: rgba(239, 68, 68, 0.16); border-color: rgba(252, 165, 165, 0.22); color: #fecaca; }
+
+.call-fullscreen-button {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    z-index: 2;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 999px;
+    background: rgba(10, 14, 18, 0.72);
+    color: #f3f7ff;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    padding: 7px 10px;
+    cursor: pointer;
+}
+
+.call-panel .call-action-button {
+    width: 46px;
+    height: 46px;
+    border-radius: 50%;
+    padding: 0;
+}
+
+@media (max-width: 620px) {
+    .recording-timeline {
+        min-width: 0;
+        flex: 1;
+    }
+
+    .recording-timeline__hint {
+        display: none;
+    }
+
+    .call-panel { left: 12px; right: 12px; width: auto; }
+    .call-remote-video { height: 160px; }
+}
 @keyframes spin {
     0% { transform: rotate(0deg); }
     100% { transform: rotate(360deg); }
