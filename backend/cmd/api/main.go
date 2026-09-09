@@ -2,8 +2,9 @@ package main
 
 import (
 	"golang-jwt-project/internal/middleware"
-	"golang.org/x/time/rate"
 	"log"
+
+	"golang.org/x/time/rate"
 
 	"golang-jwt-project/database/config"
 	"golang-jwt-project/database/store"

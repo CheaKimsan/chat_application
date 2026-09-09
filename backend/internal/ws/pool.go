@@ -11,15 +11,18 @@ type Pool struct {
 	Clients    map[string]*Client
 	Broadcast  chan Message
 	mu         sync.RWMutex
+	MediaRelay *MediaRelay
 }
 
 func NewPool() *Pool {
-	return &Pool{
+	pool := &Pool{
 		Register:   make(chan *Client),
 		Unregister: make(chan *Client),
 		Clients:    make(map[string]*Client),
 		Broadcast:  make(chan Message),
 	}
+	pool.MediaRelay = NewMediaRelay(pool.SendToUser)
+	return pool
 }
 
 func (pool *Pool) Start() {
@@ -39,7 +42,7 @@ func (pool *Pool) Start() {
 			pool.mu.RUnlock()
 
 			snapshotPayload := map[string]any{"type": "presence_snapshot", "users": onlineUsers}
-			if err := client.Conn.WriteJSON(snapshotPayload); err != nil {
+			if err := client.WriteJSON(snapshotPayload); err != nil {
 				fmt.Println("presence snapshot error for", client.ID, ":", err)
 			}
 
@@ -49,7 +52,7 @@ func (pool *Pool) Start() {
 				if c.ID == client.ID {
 					continue
 				}
-				if err := c.Conn.WriteJSON(presencePayload); err != nil {
+				if err := c.WriteJSON(presencePayload); err != nil {
 					fmt.Println("presence broadcast error for", c.ID, ":", err)
 				}
 			}
@@ -64,7 +67,7 @@ func (pool *Pool) Start() {
 			presencePayload := map[string]any{"type": "presence", "user_id": client.ID, "status": "offline"}
 			pool.mu.RLock()
 			for _, c := range pool.Clients {
-				if err := c.Conn.WriteJSON(presencePayload); err != nil {
+				if err := c.WriteJSON(presencePayload); err != nil {
 					fmt.Println("presence offline broadcast error for", c.ID, ":", err)
 				}
 			}
@@ -73,7 +76,7 @@ func (pool *Pool) Start() {
 		case message := <-pool.Broadcast:
 			pool.mu.RLock()
 			for _, client := range pool.Clients {
-				if err := client.Conn.WriteJSON(message); err != nil {
+				if err := client.WriteJSON(message); err != nil {
 					fmt.Println("broadcast error for", client.ID, ":", err)
 				}
 			}
@@ -89,7 +92,7 @@ func (pool *Pool) SendToUser(userID string, payload any) bool {
 	if !ok {
 		return false
 	}
-	if err := client.Conn.WriteJSON(payload); err != nil {
+	if err := client.WriteJSON(payload); err != nil {
 		fmt.Println("send error for", userID, ":", err)
 		return false
 	}

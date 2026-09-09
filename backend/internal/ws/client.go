@@ -17,6 +17,12 @@ type Client struct {
 	mu   sync.Mutex
 }
 
+func (c *Client) WriteJSON(payload any) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.Conn.WriteJSON(payload)
+}
+
 // Read pumps incoming frames off the socket, decodes them, and routes
 // them either to a specific recipient or broadcasts them to the pool.
 // It runs until the connection errors or closes, then unregisters the
@@ -41,6 +47,30 @@ func (c *Client) Read() {
 		}
 
 		if msg.ToUser != "" {
+			if msg.Type == "media_offer" {
+				if err := c.Pool.MediaRelay.HandleOffer(msg); err != nil {
+					c.Pool.SendToUser(c.ID, Message{Type: "media_failed", FromUser: "server", ToUser: c.ID, CallID: msg.CallID, Reason: err.Error()})
+				}
+				continue
+			}
+			if msg.Type == "media_answer" {
+				if err := c.Pool.MediaRelay.HandleAnswer(msg); err != nil {
+					log.Println("media answer error:", err)
+					c.Pool.SendToUser(c.ID, Message{Type: "media_failed", FromUser: "server", ToUser: c.ID, CallID: msg.CallID, Reason: err.Error()})
+				}
+				continue
+			}
+			if msg.Type == "media_ice_candidate" {
+				if err := c.Pool.MediaRelay.AddCandidate(msg); err != nil {
+					log.Println("media ICE candidate error:", err)
+					c.Pool.SendToUser(c.ID, Message{Type: "media_failed", FromUser: "server", ToUser: c.ID, CallID: msg.CallID, Reason: err.Error()})
+				}
+				continue
+			}
+			if msg.Type == "media_end" {
+				c.Pool.MediaRelay.RemoveCall(msg.CallID)
+				continue
+			}
 			delivered := c.Pool.SendToUser(msg.ToUser, msg)
 			if strings.HasPrefix(msg.Type, "call_") || msg.Type == "ice_candidate" {
 				log.Printf("call signal %s from %s to %s delivered=%t call_id=%s", msg.Type, msg.FromUser, msg.ToUser, delivered, msg.CallID)

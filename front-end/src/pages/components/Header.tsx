@@ -107,12 +107,13 @@ export default function ChatHeader({
 
     return (
         <div
+            className="chat-header"
             style={{
                 fontFamily: "'Inter', sans-serif",
                 display: 'flex',
                 alignItems: 'center',
                 gap: 12,
-                padding: '14px 20px',
+                padding: '14px 128px 14px 20px',
                 borderBottom: `1px solid ${COLORS.border}`,
                 background: '#14171B',
                 color: '#E7E3DA',

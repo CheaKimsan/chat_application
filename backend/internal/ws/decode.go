@@ -107,6 +107,29 @@ func HandleIncomingSocketMessage(fromUserID string, raw []byte) (Message, error)
 		}
 		return Message{Type: kind, FromUser: fromUserID, ToUser: toUser, CallID: callID}, nil
 
+	case "media_offer", "media_answer":
+		sdp, _ := envelope["sdp"].(string)
+		if callID == "" || sdp == "" {
+			return Message{}, fmt.Errorf("%s requires call_id and sdp", kind)
+		}
+		return Message{Type: kind, FromUser: fromUserID, ToUser: fromUserID, CallID: callID, SDP: sdp}, nil
+
+	case "media_ice_candidate":
+		candidate, _ := envelope["candidate"].(string)
+		if callID == "" || candidate == "" {
+			return Message{}, fmt.Errorf("media_ice_candidate requires call_id and candidate")
+		}
+		lineIndex, _ := envelope["sdp_m_line_index"].(float64)
+		line := int(lineIndex)
+		mid, _ := envelope["sdp_mid"].(string)
+		return Message{Type: kind, FromUser: fromUserID, ToUser: fromUserID, CallID: callID, Candidate: candidate, SDPMLine: &line, SDPMid: mid}, nil
+
+	case "media_end":
+		if callID == "" {
+			return Message{}, fmt.Errorf("media_end requires call_id")
+		}
+		return Message{Type: kind, FromUser: fromUserID, ToUser: fromUserID, CallID: callID}, nil
+
 	default:
 		return Message{}, fmt.Errorf("unsupported message kind: %s", kind)
 	}

@@ -106,6 +106,10 @@ export const connectSocket = async (token?: string) => {
                 emitChatEvent("chat:new_message", { ...msg, plaintext: null, decryptError: (err as Error).message });
             }
         }
+        if (["media_answer", "media_offer", "media_ice_candidate", "media_failed"].includes(payload.type)) {
+            emitChatEvent("chat:media", payload);
+            return;
+        }
         if (payload.type === "message_updated") {
             const msg = payload.message;
             try {
@@ -212,7 +216,7 @@ export const sendMarkRead = (fromUserOfMessages: string) => {
 };
 
 export const sendCallSignal = (signal: {
-    kind: "call_offer" | "call_answer" | "ice_candidate" | "call_end" | "call_reject" | "call_busy";
+    kind: "call_start" | "call_offer" | "call_answer" | "ice_candidate" | "call_end" | "call_reject" | "call_busy";
     to_user: string;
     call_id: string;
     sdp?: string;
@@ -221,5 +225,16 @@ export const sendCallSignal = (signal: {
     sdp_mid?: string | null;
 }) => {
     console.log("CALL SEND", signal.kind, signal.to_user, signal.call_id);
+    send(signal);
+};
+
+export const sendMediaSignal = (signal: {
+    kind: "media_offer" | "media_answer" | "media_ice_candidate" | "media_end";
+    call_id: string;
+    sdp?: string;
+    candidate?: string;
+    sdp_m_line_index?: number | null;
+    sdp_mid?: string | null;
+}) => {
     send(signal);
 };

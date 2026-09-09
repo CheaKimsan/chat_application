@@ -361,7 +361,7 @@ export default function Layout() {
 
             <main className="layout-main">
                 {selectedContact && <ChatHeader contact={contact} isTyping={isTyping} />}
-                <CallPanel contactId={selectedContact?.id} />
+                {selectedContact && <CallPanel contactId={selectedContact.id} />}
 
                 <div className="layout-user-menu">
                     {user && <UserMenu username={user.username} email={user.email} onLogout={handleLogout} />}

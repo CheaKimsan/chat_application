@@ -18,6 +18,27 @@ type CallRecord = {
     direction?: "incoming" | "outgoing";
 };
 
+const parseTimestamp = (value: string | number | Date) => {
+    if (value instanceof Date) return value.getTime();
+    if (typeof value === "number") return value;
+
+    const timestamp = value.trim();
+    const hasTimezone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(timestamp);
+    const isoTimestamp = timestamp.includes("T") ? timestamp : timestamp.replace(" ", "T");
+    const parsed = hasTimezone
+        ? Date.parse(isoTimestamp)
+        : Date.parse(`${isoTimestamp}+07:00`);
+    return parsed;
+};
+
+// Pulls HH:MM straight out of an ISO timestamp string, with no timezone
+// conversion at all — e.g. "2026-09-09T11:27:15.411083Z" -> "11:27".
+const extractTimeOnly = (value: string) => {
+    const match = value.match(/T(\d{2}):(\d{2})/);
+    return match ? `${match[1]}:${match[2]}` : "";
+};
+
+
 export default function ChatWindow() {
     const { selectedContact, isUploading, uploadProgress, uploadedBytes, uploadTotalBytes } = useOutletContext<{
         selectedContact?: UserResponse;
@@ -32,6 +53,7 @@ export default function ChatWindow() {
     const [callHistory, setCallHistory] = useState<CallRecord[]>([]);
     const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
     const [editingText, setEditingText] = useState("");
+    const [openMessageMenuId, setOpenMessageMenuId] = useState<string | null>(null);
     const bottomRef = useRef<HTMLDivElement | null>(null);
 
     useEffect(() => {
@@ -224,43 +246,35 @@ export default function ChatWindow() {
     if (error) return <div>Failed to load messages</div>;
 
     const orderedMessages = [...messages].sort(
-        (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+        (a, b) => parseTimestamp(a.created_at) - parseTimestamp(b.created_at)
     );
     const timeline = [
         ...orderedMessages.map((message) => ({
             kind: "message" as const,
-            timestamp: new Date(message.created_at).getTime(),
+            timestamp: parseTimestamp(message.created_at),
             message,
         })),
         ...callHistory.map((record) => ({
             kind: "call" as const,
-            timestamp: new Date(record.createdAt).getTime(),
+            timestamp: parseTimestamp(record.createdAt),
             record,
         })),
     ].sort((a, b) => a.timestamp - b.timestamp);
-    const displayTimeZone = "UTC";
     const today = new Date();
-    const todayKey = today.toISOString().slice(0, 10);
+    const todayKey = today.toDateString();
     const yesterday = new Date(today);
-    yesterday.setUTCDate(yesterday.getUTCDate() - 1);
-    const yesterdayKey = yesterday.toISOString().slice(0, 10);
+    yesterday.setDate(yesterday.getDate() - 1);
+    const yesterdayKey = yesterday.toDateString();
     const formatDateLabel = (timestamp: number) => {
         const date = new Date(timestamp);
-        const dateKey = date.toISOString().slice(0, 10);
+        const dateKey = date.toDateString();
         const isToday = dateKey === todayKey;
         const isYesterday = dateKey === yesterdayKey;
 
         if (isToday) return "Today";
         if (isYesterday) return "Yesterday";
-        return date.toLocaleDateString([], { month: "short", day: "numeric", year: "numeric", timeZone: displayTimeZone });
+        return date.toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" });
     };
-    const formatTime = (timestamp: number) =>
-        new Date(timestamp).toLocaleTimeString([], {
-            hour: "numeric",
-            minute: "2-digit",
-            hour12: true,
-            timeZone: displayTimeZone,
-        });
 
     // index of the last message I sent — only that one gets a "Delivered/Read" label
     const lastSelfIndex = [...orderedMessages].reverse().findIndex((m) => String(m.from_user) === String(user?.id));
@@ -276,8 +290,8 @@ export default function ChatWindow() {
                 }
             `}</style>
             {timeline.map((item, index) => {
-                const currentDate = new Date(item.timestamp).toISOString().slice(0, 10);
-                const previousDate = index > 0 ? new Date(timeline[index - 1].timestamp).toISOString().slice(0, 10) : null;
+                const currentDate = new Date(item.timestamp).toDateString();
+                const previousDate = index > 0 ? new Date(timeline[index - 1].timestamp).toDateString() : null;
                 const showDateDivider = currentDate !== previousDate;
 
                 if (item.kind === "call") {
@@ -293,8 +307,7 @@ export default function ChatWindow() {
                                     <strong>{title}</strong>
                                     <span>
                                         {isIncoming ? <ArrowDownLeft size={15} /> : <ArrowUpRight size={15} />}
-                                        {formatTime(item.timestamp)}
-                                        {record.durationSeconds !== undefined && `, ${record.durationSeconds} seconds`}
+                                        {record.durationSeconds !== undefined && `${record.durationSeconds} seconds`}
                                     </span>
                                 </div>
                                 <CallIcon className="call-history-card__icon" size={25} />
@@ -314,6 +327,12 @@ export default function ChatWindow() {
                         {showDateDivider && <div className="chat-date-divider"><span>{formatDateLabel(item.timestamp)}</span></div>}
                         <div
                             className={`message-entry ${isSelf ? "message-entry--self" : ""}`}
+                            onClick={(event) => {
+                                if (!isSelf || isEditing) return;
+                                const target = event.target as HTMLElement;
+                                if (target.closest("button, input, form, audio, video, img")) return;
+                                setOpenMessageMenuId(openMessageMenuId === m.id ? null : m.id);
+                            }}
                             style={{
                                 display: "flex",
                                 flexDirection: "column",
@@ -389,11 +408,17 @@ export default function ChatWindow() {
                                         );
                                         setEditingMessageId(null);
                                     }}
-                                    style={{ display: "flex", gap: 6, maxWidth: "70%" }}
+                                    className="message-edit-form"
                                 >
-                                    <input value={editingText} onChange={(event) => setEditingText(event.target.value)} autoFocus />
-                                    <button type="submit">Save</button>
-                                    <button type="button" onClick={() => setEditingMessageId(null)}>Cancel</button>
+                                    <input
+                                        className="message-edit-input"
+                                        value={editingText}
+                                        onChange={(event) => setEditingText(event.target.value)}
+                                        autoFocus
+                                        aria-label="Edit message"
+                                    />
+                                    <button className="message-edit-save" type="submit" disabled={!editingText.trim()}>Save</button>
+                                    <button className="message-edit-cancel" type="button" onClick={() => setEditingMessageId(null)}>Cancel</button>
                                 </form>
                             ) : m.body && (
                                 m.body === "[pending — waiting for secure connection]" ? (
@@ -438,21 +463,28 @@ export default function ChatWindow() {
                             )}
 
                             <span style={{ fontSize: 11, color: "#8B92A0", marginTop: 2 }}>
-                                {formatTime(item.timestamp)}{showReceipt ? ` · ${m.read_at ? "Read" : "Delivered"}` : ""}
+                                {extractTimeOnly(m.created_at)}{showReceipt ? ` · ${m.read_at ? "Read" : "Delivered"}` : ""}
                             </span>
-                            {isSelf && !isEditing && (
-                                <span className="message-actions">
-                                    {m.body && <button className="message-action-button" type="button" onClick={() => { setEditingMessageId(m.id); setEditingText(m.body); }} title="Edit message">
-                                        <Pencil size={14} />
-                                    </button>}
-                                    <button className="message-action-button message-action-button--delete" type="button" onClick={async () => {
-                                        if (!window.confirm("Delete this message?")) return;
-                                        await reqDeleteMessage(m.id);
-                                        queryClient.setQueryData<MessageResponse[]>(["messages", selectedContact!.id], (prev = []) => prev.filter((message) => message.id !== m.id));
-                                    }} title="Delete message">
-                                        <Trash2 size={14} />
-                                    </button>
-                                </span>
+                            {isSelf && !isEditing && openMessageMenuId === m.id && (
+                                <div className="message-actions">
+                                    <div className="message-actions-menu">
+                                        {m.body && (
+                                            <button type="button" onClick={() => { setEditingMessageId(m.id); setEditingText(m.body); setOpenMessageMenuId(null); }}>
+                                                <Pencil size={14} />
+                                                Edit
+                                            </button>
+                                        )}
+                                        <button type="button" className="message-actions-menu__delete" onClick={async () => {
+                                            setOpenMessageMenuId(null);
+                                            if (!window.confirm("Delete this message?")) return;
+                                            await reqDeleteMessage(m.id);
+                                            queryClient.setQueryData<MessageResponse[]>(["messages", selectedContact!.id], (prev = []) => prev.filter((message) => message.id !== m.id));
+                                        }}>
+                                            <Trash2 size={14} />
+                                            Delete
+                                        </button>
+                                    </div>
+                                </div>
                             )}
                         </div>
                     </Fragment>
