@@ -308,24 +308,24 @@ func (r *MediaRelay) forwardTrack(callID, sourceUser string, remote *webrtc.Trac
 	}
 	session.tracks[sourceUser] = track
 	session.trackOwners[track.ID()] = sourceUser
-	var destination *mediaPeer
+
+	var destinations []*mediaPeer
 	for userID, peer := range session.users {
-		if userID != sourceUser {
-			destination = peer
-			break
+		if userID == sourceUser {
+			continue
 		}
-	}
-	if destination != nil && !destination.attachedTracks[track.ID()] {
-		if _, err := destination.pc.AddTrack(track); err == nil {
-			destination.attachedTracks[track.ID()] = true
+		if !peer.attachedTracks[track.ID()] {
+			if _, err := peer.pc.AddTrack(track); err == nil {
+				peer.attachedTracks[track.ID()] = true
+				destinations = append(destinations, peer)
+			}
 		}
 	}
 	r.mu.Unlock()
 
-	// Schedule (debounced) renegotiation outside the lock. If audio and
-	// video tracks both arrive within the debounce window, this collapses
-	// into a single offer/answer round trip instead of one per track.
-	if destination != nil {
+	// Schedule (debounced) renegotiation for every subscriber that just
+	// got a new track attached — not just one.
+	for _, destination := range destinations {
 		r.scheduleNegotiate(destination, callID)
 	}
 
@@ -337,7 +337,6 @@ func (r *MediaRelay) forwardTrack(callID, sourceUser string, remote *webrtc.Trac
 		_ = track.WriteRTP(packet)
 	}
 }
-
 func (r *MediaRelay) HandleAnswer(msg Message) error {
 	r.mu.Lock()
 	session := r.sessions[msg.CallID]

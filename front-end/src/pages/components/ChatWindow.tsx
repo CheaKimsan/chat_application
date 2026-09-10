@@ -6,7 +6,13 @@ import { sendMarkRead } from "../../socket/socketClient";
 import { UserResponse } from "../../components/user/core/model";
 import { LoadingSpinner } from "../../shared/LoadingSpinner";
 import { MessageResponse } from "../../components/message/core/model";
-import { reqDeleteMessage, reqEditMessage, reqGetCallHistory, reqGetMessages } from "../../components/message/core/request";
+import {
+    reqDeleteMessage,
+    reqEditMessage,
+    reqGetCallHistory,
+    reqGetConversationMessages,
+    reqGetMessages,
+} from "../../components/message/core/request";
 import { ArrowDownLeft, ArrowUpRight, Pencil, Phone, Trash2, Video } from "lucide-react";
 
 type CallRecord = {
@@ -16,6 +22,16 @@ type CallRecord = {
     createdAt: string;
     durationSeconds?: number;
     direction?: "incoming" | "outgoing";
+};
+
+// Minimal shape of what Layout.tsx passes down as `selectedConversation`
+// (its full `Conversation` type) — members are needed here to resolve
+// each message's sender to an avatar/name in group chats.
+type SelectedConversation = {
+    id: string;
+    isGroup: boolean;
+    name?: string;
+    members: { id: string; username: string; profile_photo?: string }[];
 };
 
 const parseTimestamp = (value: string | number | Date) => {
@@ -38,10 +54,52 @@ const extractTimeOnly = (value: string) => {
     return match ? `${match[1]}:${match[2]}` : "";
 };
 
+const initialsOf = (name: string) =>
+    name
+        .split(" ")
+        .map((part) => part[0]?.toUpperCase())
+        .join("")
+        .slice(0, 2) || "?";
+
+type SenderInfo = { username: string; profile_photo?: string };
+
+function SenderAvatar({ sender }: { sender: SenderInfo }) {
+    return (
+        <div
+            title={sender.username}
+            style={{
+                width: 28,
+                height: 28,
+                flexShrink: 0,
+                borderRadius: "50%",
+                background: "#20242A",
+                border: "1px solid #23262A",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                overflow: "hidden",
+                color: "#8B92A0",
+                fontSize: 11,
+                fontWeight: 700,
+            }}
+        >
+            {sender.profile_photo ? (
+                <img
+                    src={sender.profile_photo}
+                    alt=""
+                    style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                />
+            ) : (
+                initialsOf(sender.username)
+            )}
+        </div>
+    );
+}
 
 export default function ChatWindow() {
-    const { selectedContact, isUploading, uploadProgress, uploadedBytes, uploadTotalBytes } = useOutletContext<{
+    const { selectedContact, selectedConversation, isUploading, uploadProgress, uploadedBytes, uploadTotalBytes } = useOutletContext<{
         selectedContact?: UserResponse;
+        selectedConversation?: SelectedConversation;
         isUploading?: boolean;
         uploadProgress?: number;
         uploadedBytes?: number;
@@ -55,6 +113,30 @@ export default function ChatWindow() {
     const [editingText, setEditingText] = useState("");
     const [openMessageMenuId, setOpenMessageMenuId] = useState<string | null>(null);
     const bottomRef = useRef<HTMLDivElement | null>(null);
+
+    // Groups are addressed by conversation_id; 1:1 chats are addressed by
+    // the other user's id. Exactly one of these is set at a time (Layout
+    // clears selectedContact when a group is selected, and vice versa).
+    const conversationId = selectedConversation?.id;
+    const contactId = selectedContact?.id;
+    const activeId = conversationId ?? (contactId !== undefined ? String(contactId) : undefined);
+    const isGroup = !!conversationId;
+
+    // Resolve a from_user id to {username, profile_photo} so each message
+    // bubble can show who actually sent it — needed for group chats where
+    // "not self" could be any of several members.
+    const getSenderInfo = (fromUserId: string): SenderInfo => {
+        if (isGroup) {
+            const member = selectedConversation!.members.find((m) => String(m.id) === String(fromUserId));
+            return { username: member?.username || "Unknown", profile_photo: member?.profile_photo };
+        }
+        return { username: selectedContact?.username ?? "Unknown", profile_photo: selectedContact?.profile_photo };
+    };
+
+    // Matches the keys Layout.tsx's sendMutation.onSuccess already invalidates.
+    const messagesQueryKey = conversationId
+        ? ["messages", "conv", conversationId]
+        : ["messages", contactId];
 
     useEffect(() => {
         if (!selectedContact?.id) {
@@ -94,34 +176,37 @@ export default function ChatWindow() {
         isLoading,
         error,
     } = useQuery<MessageResponse[]>({
-        queryKey: ["messages", selectedContact?.id],
+        queryKey: messagesQueryKey,
         queryFn: async () => {
-            const result = await reqGetMessages(selectedContact!.id);
+            if (conversationId) {
+                return await reqGetConversationMessages(conversationId);
+            }
+            const result = await reqGetMessages(contactId!);
             return Array.isArray(result) ? result : (result as any)?.messages ?? [];
         },
-        enabled: !!selectedContact?.id,
+        enabled: !!conversationId || !!contactId,
     });
 
     useEffect(() => {
-        if (!selectedContact?.id) return;
+        if (!contactId) return;
 
         const handleKeyReady = (event: Event) => {
             const { userId } = (event as CustomEvent<{ userId: string }>).detail;
-            if (String(userId) !== String(selectedContact.id)) return;
+            if (String(userId) !== String(contactId)) return;
 
-            queryClient.invalidateQueries({ queryKey: ["messages", selectedContact.id] });
+            queryClient.invalidateQueries({ queryKey: ["messages", contactId] });
         };
 
         window.addEventListener("chat:key_ready", handleKeyReady);
         return () => window.removeEventListener("chat:key_ready", handleKeyReady);
-    }, [queryClient, selectedContact?.id]);
+    }, [queryClient, contactId]);
 
     useEffect(() => {
-        if (!selectedContact?.id) return;
+        if (!activeId) return;
 
         const handleUpdated = (event: Event) => {
             const updated = (event as CustomEvent<MessageResponse & { plaintext?: string | null; decryptError?: string }>).detail;
-            queryClient.setQueryData<MessageResponse[]>(["messages", selectedContact.id], (prev = []) =>
+            queryClient.setQueryData<MessageResponse[]>(messagesQueryKey, (prev = []) =>
                 prev.map((message) => String(message.id) === String(updated.id)
                     ? { ...message, ...updated, body: updated.plaintext ?? (updated.decryptError ? "[unable to decrypt]" : updated.body ?? "") }
                     : message)
@@ -129,7 +214,7 @@ export default function ChatWindow() {
         };
         const handleDeleted = (event: Event) => {
             const { message_id } = (event as CustomEvent<{ message_id: string }>).detail;
-            queryClient.setQueryData<MessageResponse[]>(["messages", selectedContact.id], (prev = []) =>
+            queryClient.setQueryData<MessageResponse[]>(messagesQueryKey, (prev = []) =>
                 prev.filter((message) => String(message.id) !== String(message_id))
             );
         };
@@ -139,22 +224,22 @@ export default function ChatWindow() {
             window.removeEventListener("chat:message_updated", handleUpdated);
             window.removeEventListener("chat:message_deleted", handleDeleted);
         };
-    }, [queryClient, selectedContact?.id]);
+    }, [queryClient, activeId, conversationId, contactId]);
 
     useEffect(() => {
         bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-    }, [messages, callHistory, selectedContact?.id]);
+    }, [messages, callHistory, activeId]);
 
     useEffect(() => {
-        if (!selectedContact?.id) return;
+        if (!activeId) return;
 
         const handleIncomingMessage = (event: Event) => {
             const incoming = (event as CustomEvent<MessageResponse & { plaintext?: string | null; decryptError?: string }>).detail;
             if (!incoming) return;
 
-            const isRelevant =
-                String(incoming.from_user) === String(selectedContact.id) ||
-                String(incoming.to_user) === String(selectedContact.id);
+            const isRelevant = conversationId
+                ? String(incoming.conversation_id) === String(conversationId)
+                : String(incoming.from_user) === String(contactId) || String(incoming.to_user) === String(contactId);
 
             if (!isRelevant) return;
 
@@ -163,7 +248,7 @@ export default function ChatWindow() {
                 body: incoming.plaintext ?? (incoming.decryptError ? "[unable to decrypt]" : incoming.body ?? ""),
             };
 
-            queryClient.setQueryData<MessageResponse[]>(["messages", selectedContact.id], (prev = []) => {
+            queryClient.setQueryData<MessageResponse[]>(messagesQueryKey, (prev = []) => {
                 if (prev.some((m) => m.id === normalized.id)) return prev;
 
                 return [...prev, normalized].sort(
@@ -174,16 +259,16 @@ export default function ChatWindow() {
 
         window.addEventListener("chat:new_message", handleIncomingMessage);
         return () => window.removeEventListener("chat:new_message", handleIncomingMessage);
-    }, [queryClient, selectedContact?.id]);
+    }, [queryClient, activeId, conversationId, contactId]);
 
     useEffect(() => {
-        if (!selectedContact?.id) return;
+        if (!activeId) return;
 
         const handleIncomingAttachment = (event: Event) => {
             const attachment = (event as CustomEvent<any>).detail;
             if (!attachment?.message_id) return;
 
-            queryClient.setQueryData<MessageResponse[]>(["messages", selectedContact.id], (prev = []) =>
+            queryClient.setQueryData<MessageResponse[]>(messagesQueryKey, (prev = []) =>
                 prev.map((m) =>
                     String(m.id) === String(attachment.message_id)
                         ? { ...m, attachments: [...(m.attachments ?? []), attachment] }
@@ -194,44 +279,44 @@ export default function ChatWindow() {
 
         window.addEventListener("chat:new_attachment", handleIncomingAttachment);
         return () => window.removeEventListener("chat:new_attachment", handleIncomingAttachment);
-    }, [queryClient, selectedContact?.id]);
+    }, [queryClient, activeId, conversationId, contactId]);
 
     useEffect(() => {
-        if (!selectedContact?.id) return;
+        if (!contactId) return;
 
         const handleTyping = (event: Event) => {
             const { from_user, is_typing } = (event as CustomEvent<{ from_user: string; is_typing: boolean }>).detail;
-            if (String(from_user) !== String(selectedContact.id)) return;
+            if (String(from_user) !== String(contactId)) return;
             setIsContactTyping(is_typing);
         };
 
         window.addEventListener("chat:typing", handleTyping);
         return () => window.removeEventListener("chat:typing", handleTyping);
-    }, [selectedContact?.id]);
+    }, [contactId]);
 
     useEffect(() => {
         setIsContactTyping(false);
-    }, [selectedContact?.id]);
+    }, [activeId]);
 
     useEffect(() => {
-        if (!selectedContact?.id || messages.length === 0) return;
+        if (!contactId || messages.length === 0) return;
 
         const hasUnreadFromContact = messages.some(
-            (m) => String(m.from_user) === String(selectedContact.id) && !m.read_at
+            (m) => String(m.from_user) === String(contactId) && !m.read_at
         );
         if (hasUnreadFromContact) {
-            sendMarkRead(selectedContact.id);
+            sendMarkRead(contactId);
         }
-    }, [selectedContact?.id, messages]);
+    }, [contactId, messages]);
 
     useEffect(() => {
-        if (!selectedContact?.id) return;
+        if (!contactId) return;
 
         const handleMessageRead = (event: Event) => {
             const { from_user, read_at } = (event as CustomEvent<{ from_user: string; read_at: string }>).detail;
-            if (String(from_user) !== String(selectedContact.id)) return;
+            if (String(from_user) !== String(contactId)) return;
 
-            queryClient.setQueryData<MessageResponse[]>(["messages", selectedContact.id], (prev = []) =>
+            queryClient.setQueryData<MessageResponse[]>(["messages", contactId], (prev = []) =>
                 prev.map((m) =>
                     String(m.to_user) === String(from_user) && !m.read_at ? { ...m, read_at } : m
                 )
@@ -240,7 +325,7 @@ export default function ChatWindow() {
 
         window.addEventListener("chat:message_read", handleMessageRead);
         return () => window.removeEventListener("chat:message_read", handleMessageRead);
-    }, [queryClient, selectedContact?.id]);
+    }, [queryClient, contactId]);
 
     if (isLoading) return <div>Loading messages…</div>;
     if (error) return <div>Failed to load messages</div>;
@@ -321,6 +406,20 @@ export default function ChatWindow() {
                 const showReceipt = isSelf && m.id === lastSelfMessageId;
                 const attachments = m.attachments ?? [];
                 const isEditing = editingMessageId === m.id;
+                // Editing goes through the encrypted 1:1 edit flow (reqEditMessage
+                // needs a contactId to resolve the shared key), so it's only
+                // offered for 1:1 messages — group messages are plaintext and
+                // don't have a matching group-edit endpoint yet.
+                const canEdit = isSelf && !conversationId;
+
+                // Whether consecutive messages come from the same sender —
+                // groups the avatar/name once per run instead of every bubble.
+                const previousItem = index > 0 ? timeline[index - 1] : null;
+                const previousFromSameSender =
+                    previousItem?.kind === "message" && String(previousItem.message.from_user) === String(m.from_user);
+                const showSenderHeader = !isSelf && !showDateDivider && !previousFromSameSender;
+                const showAvatarSlot = !isSelf;
+                const sender = !isSelf ? getSenderInfo(m.from_user) : null;
 
                 return (
                     <Fragment key={m.id}>
@@ -335,157 +434,178 @@ export default function ChatWindow() {
                             }}
                             style={{
                                 display: "flex",
-                                flexDirection: "column",
-                                alignItems: isSelf ? "flex-end" : "flex-start",
+                                flexDirection: "row",
+                                justifyContent: isSelf ? "flex-end" : "flex-start",
+                                alignItems: "flex-end",
                                 gap: 8,
                             }}
                         >
-                            {attachments.length > 0 && (
-                                <div
-                                    style={{
-                                        maxWidth: "70%",
-                                        display: "flex",
-                                        flexDirection: "column",
-                                        gap: 8,
-                                    }}
-                                >
-                                    {attachments.map((attachment) => {
-                                        const isImage = attachment.type === "image" || attachment.mime_type?.startsWith("image/");
-                                        const isVideo = attachment.type === "video" || attachment.mime_type?.startsWith("video/");
-                                        const isAudio = attachment.type === "audio" || attachment.mime_type?.startsWith("audio/");
-
-                                        return isImage ? (
-                                            <img
-                                                key={attachment.id}
-                                                src={attachment.url}
-                                                alt="uploaded image"
-                                                style={{
-                                                    maxWidth: 260,
-                                                    maxHeight: 260,
-                                                    borderRadius: 12,
-                                                    border: "1px solid rgba(255,255,255,0.1)",
-                                                    objectFit: "cover",
-                                                }}
-                                            />
-                                        ) : isAudio ? (
-                                            <audio
-                                                key={attachment.id}
-                                                controls
-                                                style={{ maxWidth: 320 }}
-                                            >
-                                                <source src={attachment.url} type={attachment.mime_type} />
-                                                Your browser does not support the audio tag.
-                                            </audio>
-                                        ) : isVideo ? (
-                                            <video
-                                                key={attachment.id}
-                                                controls
-                                                style={{
-                                                    maxWidth: 320,
-                                                    maxHeight: 320,
-                                                    borderRadius: 12,
-                                                    border: "1px solid rgba(255,255,255,0.1)",
-                                                    objectFit: "cover",
-                                                }}
-                                            >
-                                                <source src={attachment.url} type={attachment.mime_type} />
-                                                Your browser does not support the video tag.
-                                            </video>
-                                        ) : null;
-                                    })}
+                            {showAvatarSlot && (
+                                <div style={{ width: 28, flexShrink: 0 }}>
+                                    {showSenderHeader && sender && <SenderAvatar sender={sender} />}
                                 </div>
                             )}
 
-                            {isEditing ? (
-                                <form
-                                    onSubmit={async (event) => {
-                                        event.preventDefault();
-                                        const text = editingText.trim();
-                                        if (!text || !selectedContact) return;
-                                        const updated = await reqEditMessage({ messageId: m.id, body: text, contactId: String(selectedContact.id) });
-                                        queryClient.setQueryData<MessageResponse[]>(["messages", selectedContact.id], (prev = []) =>
-                                            prev.map((message) => message.id === m.id ? { ...message, ...updated } : message)
-                                        );
-                                        setEditingMessageId(null);
-                                    }}
-                                    className="message-edit-form"
-                                >
-                                    <input
-                                        className="message-edit-input"
-                                        value={editingText}
-                                        onChange={(event) => setEditingText(event.target.value)}
-                                        autoFocus
-                                        aria-label="Edit message"
-                                    />
-                                    <button className="message-edit-save" type="submit" disabled={!editingText.trim()}>Save</button>
-                                    <button className="message-edit-cancel" type="button" onClick={() => setEditingMessageId(null)}>Cancel</button>
-                                </form>
-                            ) : m.body && (
-                                m.body === "[pending — waiting for secure connection]" ? (
+                            <div
+                                style={{
+                                    display: "flex",
+                                    flexDirection: "column",
+                                    alignItems: isSelf ? "flex-end" : "flex-start",
+                                    gap: 4,
+                                    maxWidth: "70%",
+                                }}
+                            >
+                                {/* Sender name — only shown in group chats, only on the first bubble of a run. */}
+                                {showSenderHeader && isGroup && sender && (
+                                    <span style={{ fontSize: 11, fontWeight: 600, color: "#8B92A0", marginLeft: 2 }}>
+                                        {sender.username}
+                                    </span>
+                                )}
+
+                                {attachments.length > 0 && (
                                     <div
                                         style={{
-                                            maxWidth: "70%",
                                             display: "flex",
-                                            alignItems: "center",
-                                            gap: 6,
-                                            padding: "8px 12px",
-                                            borderRadius: 12,
-                                            backgroundColor: isSelf ? "#2563eb" : "#3f3f46",
-                                            opacity: 0.6,
+                                            flexDirection: "column",
+                                            gap: 8,
                                         }}
                                     >
-                                        <div style={{
-                                            width: 12,
-                                            height: 12,
-                                            border: "2px solid rgba(255,255,255,0.3)",
-                                            borderTop: "2px solid #fff",
-                                            borderRadius: "50%",
-                                            animation: "spin 0.8s linear infinite",
-                                            flexShrink: 0,
-                                        }} />
-                                        <span className="text-white" style={{ fontSize: 13, fontStyle: "italic" }}>
-                                            Waiting to decrypt…
-                                        </span>
-                                    </div>
-                                ) : (
-                                    <div
-                                        className="text-white message-bubble"
-                                        style={{
-                                            maxWidth: "70%",
-                                            padding: "8px 12px",
-                                            borderRadius: 12,
-                                            backgroundColor: isSelf ? "#2563eb" : "#3f3f46",
-                                        }}
-                                    >
-                                        {m.body}
-                                    </div>
-                                )
-                            )}
+                                        {attachments.map((attachment) => {
+                                            const isImage = attachment.type === "image" || attachment.mime_type?.startsWith("image/");
+                                            const isVideo = attachment.type === "video" || attachment.mime_type?.startsWith("video/");
+                                            const isAudio = attachment.type === "audio" || attachment.mime_type?.startsWith("audio/");
 
-                            <span style={{ fontSize: 11, color: "#8B92A0", marginTop: 2 }}>
-                                {extractTimeOnly(m.created_at)}{showReceipt ? ` · ${m.read_at ? "Read" : "Delivered"}` : ""}
-                            </span>
-                            {isSelf && !isEditing && openMessageMenuId === m.id && (
-                                <div className="message-actions">
-                                    <div className="message-actions-menu">
-                                        {m.body && (
-                                            <button type="button" onClick={() => { setEditingMessageId(m.id); setEditingText(m.body); setOpenMessageMenuId(null); }}>
-                                                <Pencil size={14} />
-                                                Edit
-                                            </button>
-                                        )}
-                                        <button type="button" className="message-actions-menu__delete" onClick={async () => {
-                                            setOpenMessageMenuId(null);
-                                            if (!window.confirm("Delete this message?")) return;
-                                            await reqDeleteMessage(m.id);
-                                            queryClient.setQueryData<MessageResponse[]>(["messages", selectedContact!.id], (prev = []) => prev.filter((message) => message.id !== m.id));
-                                        }}>
-                                            <Trash2 size={14} />
-                                            Delete
-                                        </button>
+                                            return isImage ? (
+                                                <img
+                                                    key={attachment.id}
+                                                    src={attachment.url}
+                                                    alt="uploaded image"
+                                                    style={{
+                                                        maxWidth: 260,
+                                                        maxHeight: 260,
+                                                        borderRadius: 12,
+                                                        border: "1px solid rgba(255,255,255,0.1)",
+                                                        objectFit: "cover",
+                                                    }}
+                                                />
+                                            ) : isAudio ? (
+                                                <audio
+                                                    key={attachment.id}
+                                                    controls
+                                                    style={{ maxWidth: 320 }}
+                                                >
+                                                    <source src={attachment.url} type={attachment.mime_type} />
+                                                    Your browser does not support the audio tag.
+                                                </audio>
+                                            ) : isVideo ? (
+                                                <video
+                                                    key={attachment.id}
+                                                    controls
+                                                    style={{
+                                                        maxWidth: 320,
+                                                        maxHeight: 320,
+                                                        borderRadius: 12,
+                                                        border: "1px solid rgba(255,255,255,0.1)",
+                                                        objectFit: "cover",
+                                                    }}
+                                                >
+                                                    <source src={attachment.url} type={attachment.mime_type} />
+                                                    Your browser does not support the video tag.
+                                                </video>
+                                            ) : null;
+                                        })}
                                     </div>
-                                </div>
-                            )}
+                                )}
+
+                                {isEditing ? (
+                                    <form
+                                        onSubmit={async (event) => {
+                                            event.preventDefault();
+                                            const text = editingText.trim();
+                                            if (!text || !contactId) return;
+                                            const updated = await reqEditMessage({ messageId: m.id, body: text, contactId: String(contactId) });
+                                            queryClient.setQueryData<MessageResponse[]>(messagesQueryKey, (prev = []) =>
+                                                prev.map((message) => message.id === m.id ? { ...message, ...updated } : message)
+                                            );
+                                            setEditingMessageId(null);
+                                        }}
+                                        className="message-edit-form"
+                                    >
+                                        <input
+                                            className="message-edit-input"
+                                            value={editingText}
+                                            onChange={(event) => setEditingText(event.target.value)}
+                                            autoFocus
+                                            aria-label="Edit message"
+                                        />
+                                        <button className="message-edit-save" type="submit" disabled={!editingText.trim()}>Save</button>
+                                        <button className="message-edit-cancel" type="button" onClick={() => setEditingMessageId(null)}>Cancel</button>
+                                    </form>
+                                ) : m.body && (
+                                    m.body === "[pending — waiting for secure connection]" ? (
+                                        <div
+                                            style={{
+                                                display: "flex",
+                                                alignItems: "center",
+                                                gap: 6,
+                                                padding: "8px 12px",
+                                                borderRadius: 12,
+                                                backgroundColor: isSelf ? "#2563eb" : "#3f3f46",
+                                                opacity: 0.6,
+                                            }}
+                                        >
+                                            <div style={{
+                                                width: 12,
+                                                height: 12,
+                                                border: "2px solid rgba(255,255,255,0.3)",
+                                                borderTop: "2px solid #fff",
+                                                borderRadius: "50%",
+                                                animation: "spin 0.8s linear infinite",
+                                                flexShrink: 0,
+                                            }} />
+                                            <span className="text-white" style={{ fontSize: 13, fontStyle: "italic" }}>
+                                                Waiting to decrypt…
+                                            </span>
+                                        </div>
+                                    ) : (
+                                        <div
+                                            className="text-white message-bubble"
+                                            style={{
+                                                padding: "8px 12px",
+                                                borderRadius: 12,
+                                                backgroundColor: isSelf ? "#2563eb" : "#3f3f46",
+                                            }}
+                                        >
+                                            {m.body}
+                                        </div>
+                                    )
+                                )}
+
+                                <span style={{ fontSize: 11, color: "#8B92A0", marginTop: 2 }}>
+                                    {extractTimeOnly(m.created_at)}{showReceipt ? ` · ${m.read_at ? "Read" : "Delivered"}` : ""}
+                                </span>
+                                {isSelf && !isEditing && openMessageMenuId === m.id && (
+                                    <div className="message-actions">
+                                        <div className="message-actions-menu">
+                                            {canEdit && m.body && (
+                                                <button type="button" onClick={() => { setEditingMessageId(m.id); setEditingText(m.body); setOpenMessageMenuId(null); }}>
+                                                    <Pencil size={14} />
+                                                    Edit
+                                                </button>
+                                            )}
+                                            <button type="button" className="message-actions-menu__delete" onClick={async () => {
+                                                setOpenMessageMenuId(null);
+                                                if (!window.confirm("Delete this message?")) return;
+                                                await reqDeleteMessage(m.id);
+                                                queryClient.setQueryData<MessageResponse[]>(messagesQueryKey, (prev = []) => prev.filter((message) => message.id !== m.id));
+                                            }}>
+                                                <Trash2 size={14} />
+                                                Delete
+                                            </button>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
                         </div>
                     </Fragment>
                 );

@@ -11,6 +11,7 @@ interface AttachmentResponse {
 interface MessageResponse {
     id: string;
     from_user: string;
+    conversation_id?: string;
     to_user: string;
     body: string;
     nonce: string,
@@ -20,11 +21,11 @@ interface MessageResponse {
 }
 
 interface SendMessageRequest {
-    to_user: string;
+    to_user?: string;           // now optional
+    conversation_id?: string;   // NEW
     body?: string;
     encrypted?: boolean;
 }
-
 interface EditMessageRequest {
     messageId: string;
     body: string;
@@ -37,4 +38,6 @@ export type {
     EditMessageRequest,
     MessageResponse
 }
+
+
 

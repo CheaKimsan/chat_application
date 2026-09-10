@@ -3,15 +3,33 @@ import { Outlet, useNavigate } from 'react-router-dom';
 import ChatHeader from './Header';
 import { useAuthStore } from '../../store/auth.store';
 import Sidebar from './Sidebar';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTypingUsers } from '../../store/typing.store';
 import { connectSocket, disconnectSocket, sendTyping } from '../../socket/socketClient';
 import UserMenu from "../../shared/UserMenu";
 import { UserResponse } from "../../components/user/core/model";
-import { reqSendMessage, reqUploadFile } from "../../components/message/core/request";
+import { reqGetUsers } from "../../components/user/core/request";
+import { reqSendMessage, reqUploadFile, reqCreateGroup, reqListConversations } from "../../components/message/core/request";
 import { Camera, Lock, MessageCircle, Mic, Paperclip, Send, Square } from 'lucide-react';
 import CallPanel from '../../components/call/CallPanel';
+import CreateGroupModal from '../../components/message/CreateGroupModal';
 
+export type Conversation = {
+    id: string;
+    isGroup: boolean;
+    name?: string;
+    profile_photo?: string;
+    members: { id: string; username: string; profile_photo?: string }[];
+};
+
+// Shape actually returned by GET /messages/conversations (snake_case, member_ids only).
+type RawConversation = {
+    id: string;
+    is_group: boolean;
+    name?: string;
+    profile_photo?: string;
+    member_ids?: string[];
+};
 
 export default function Layout() {
     const user = useAuthStore((s) => s.user);
@@ -31,32 +49,73 @@ export default function Layout() {
 
 
     const [selectedContact, setSelectedContact] = useState<UserResponse | undefined>(undefined);
+    const [selectedGroup, setSelectedGroup] = useState<Conversation | undefined>(undefined);
+    const [showCreateGroup, setShowCreateGroup] = useState(false);
 
-    const contact = selectedContact
+    // Reuses the same "users" query/cache Sidebar already populates, so the
+    // "New group" member picker doesn't trigger a second fetch. Also used
+    // below to resolve member_ids -> {id, username, profile_photo}.
+    const { data: allUsers = [] } = useQuery<UserResponse[]>({
+        queryKey: ["users"],
+        queryFn: reqGetUsers,
+    });
+
+    // Exclude the logged-in user — you can't add yourself as a group member.
+    const contactsList = allUsers.filter((u) => u.id !== user?.id);
+
+    const { data: rawConversations = [], refetch: refetchConversations } = useQuery<RawConversation[]>({
+        queryKey: ["conversations"],
+        queryFn: reqListConversations,
+        enabled: !!token,
+    });
+
+    // Backend returns is_group / member_ids (snake_case, IDs only). Map to the
+    // shape the rest of the UI expects (isGroup / members with username+photo)
+    // so Sidebar's `conversations.filter(c => c.isGroup)` actually matches.
+    const conversations: Conversation[] = rawConversations.map((c) => ({
+        id: c.id,
+        isGroup: c.is_group,
+        name: c.name,
+        profile_photo: c.profile_photo,
+        members: (c.member_ids ?? []).map((id) => {
+            const u = allUsers.find((u) => String(u.id) === String(id));
+            return { id, username: u?.username ?? '', profile_photo: u?.profile_photo };
+        }),
+    }));
+
+    const contact = selectedGroup
         ? {
-            name: selectedContact.username,
+            name: selectedGroup.name ?? 'Group',
             freq: '104.2',
             online: true,
-            profilePhoto: selectedContact.profile_photo,
-            initials: (selectedContact.username)
-                .split(' ')
-                .map((part: string) => part[0]?.toUpperCase())
-                .join('')
-                .slice(0, 2),
+            profilePhoto: selectedGroup.profile_photo,
+            initials: (selectedGroup.name ?? 'G').slice(0, 2).toUpperCase(),
         }
-        : user
+        : selectedContact
             ? {
-                name: user.username,
+                name: selectedContact.username,
                 freq: '104.2',
                 online: true,
-                profilePhoto: user.profile_photo,
-                initials: user.username
+                profilePhoto: selectedContact.profile_photo,
+                initials: (selectedContact.username)
                     .split(' ')
                     .map((part: string) => part[0]?.toUpperCase())
                     .join('')
                     .slice(0, 2),
             }
-            : undefined;
+            : user
+                ? {
+                    name: user.username,
+                    freq: '104.2',
+                    online: true,
+                    profilePhoto: user.profile_photo,
+                    initials: user.username
+                        .split(' ')
+                        .map((part: string) => part[0]?.toUpperCase())
+                        .join('')
+                        .slice(0, 2),
+                }
+                : undefined;
 
     const typingUsers = useTypingUsers(user?.id);
     const isTyping = selectedContact ? typingUsers.has(String(selectedContact.id)) : false;
@@ -141,7 +200,11 @@ export default function Layout() {
     const sendMutation = useMutation({
         mutationFn: reqSendMessage,
         onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ["messages", selectedContact?.id] });
+            if (selectedGroup) {
+                queryClient.invalidateQueries({ queryKey: ["messages", "conv", selectedGroup.id] });
+            } else {
+                queryClient.invalidateQueries({ queryKey: ["messages", selectedContact?.id] });
+            }
         },
         onError: (err) => {
             console.error('Failed to send message:', err);
@@ -150,21 +213,21 @@ export default function Layout() {
 
     const handleSend = () => {
         const trimmed = outletInput.trim();
-        if (!trimmed || !selectedContact) return;
+        if (!trimmed || (!selectedContact && !selectedGroup)) return;
 
         stopTyping();
 
-        sendMutation.mutate({
-            to_user: String(selectedContact.id),
-            body: trimmed,
-            encrypted: isEncrypted,
-        });
+        sendMutation.mutate(
+            selectedGroup
+                ? { conversation_id: selectedGroup.id, body: trimmed, encrypted: false }
+                : { to_user: String(selectedContact!.id), body: trimmed, encrypted: isEncrypted }
+        );
         setOutletInput('');
     };
 
     const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
         const fileList = event.target.files;
-        if (!fileList || fileList.length === 0 || !selectedContact) return;
+        if (!fileList || fileList.length === 0 || (!selectedContact && !selectedGroup)) return;
 
         const files = Array.from(fileList);
         const totalSize = files.reduce((sum, f) => sum + f.size, 0);
@@ -177,10 +240,11 @@ export default function Layout() {
             setUploadTotalBytes(totalSize);
             setUploadFileCount(files.length);
 
-            const createdMessage = await sendMutation.mutateAsync({
-                to_user: String(selectedContact.id),
-                body: undefined,
-            });
+            const createdMessage = await sendMutation.mutateAsync(
+                selectedGroup
+                    ? { conversation_id: selectedGroup.id, body: undefined }
+                    : { to_user: String(selectedContact!.id), body: undefined }
+            );
 
             const messageId = createdMessage?.id;
             if (!messageId) {
@@ -192,7 +256,11 @@ export default function Layout() {
                 if (loaded !== undefined) setUploadedBytes(loaded);
                 if (total !== undefined) setUploadTotalBytes(total);
             });
-            queryClient.invalidateQueries({ queryKey: ["messages", selectedContact.id] });
+            if (selectedGroup) {
+                queryClient.invalidateQueries({ queryKey: ["messages", "conv", selectedGroup.id] });
+            } else {
+                queryClient.invalidateQueries({ queryKey: ["messages", selectedContact!.id] });
+            }
         } catch (err) {
             console.error('Failed to upload file:', err);
             const responseData = (err as { response?: { data?: { message?: string; errors?: Array<{ error?: string }> } } })
@@ -211,7 +279,7 @@ export default function Layout() {
     };
 
     const handleVoiceMessage = async () => {
-        if (!selectedContact || isUploading || isVideoRecording) return;
+        if ((!selectedContact && !selectedGroup) || isUploading || isVideoRecording) return;
 
         if (isRecording) {
             mediaRecorderRef.current?.stop();
@@ -252,13 +320,17 @@ export default function Layout() {
                     const audioFile = new File([audioBlob], `voice-${Date.now()}.${extension}`, {
                         type: recordingType,
                     });
-                    const createdMessage = await sendMutation.mutateAsync({
-                        to_user: String(selectedContact.id),
-                        body: undefined,
-                        encrypted: false,
-                    });
+                    const createdMessage = await sendMutation.mutateAsync(
+                        selectedGroup
+                            ? { conversation_id: selectedGroup.id, body: undefined, encrypted: false }
+                            : { to_user: String(selectedContact!.id), body: undefined, encrypted: false }
+                    );
                     await reqUploadFile(createdMessage.id, [audioFile]);
-                    queryClient.invalidateQueries({ queryKey: ['messages', selectedContact.id] });
+                    if (selectedGroup) {
+                        queryClient.invalidateQueries({ queryKey: ['messages', 'conv', selectedGroup.id] });
+                    } else {
+                        queryClient.invalidateQueries({ queryKey: ['messages', selectedContact!.id] });
+                    }
                 } catch (err) {
                     console.error('Failed to send voice message:', err);
                     const responseData = (err as { response?: { data?: { message?: string; errors?: Array<{ error?: string }> } } })
@@ -284,7 +356,7 @@ export default function Layout() {
     };
 
     const handleVideoMessage = async () => {
-        if (!selectedContact || isUploading) return;
+        if ((!selectedContact && !selectedGroup) || isUploading) return;
 
         if (isVideoRecording) {
             videoRecorderRef.current?.stop();
@@ -320,13 +392,17 @@ export default function Layout() {
                 try {
                     const videoBlob = new Blob(videoChunksRef.current, { type: recordingType });
                     const videoFile = new File([videoBlob], `video-${Date.now()}.webm`, { type: recordingType });
-                    const createdMessage = await sendMutation.mutateAsync({
-                        to_user: String(selectedContact.id),
-                        body: undefined,
-                        encrypted: false,
-                    });
+                    const createdMessage = await sendMutation.mutateAsync(
+                        selectedGroup
+                            ? { conversation_id: selectedGroup.id, body: undefined, encrypted: false }
+                            : { to_user: String(selectedContact!.id), body: undefined, encrypted: false }
+                    );
                     await reqUploadFile(createdMessage.id, [videoFile]);
-                    queryClient.invalidateQueries({ queryKey: ['messages', selectedContact.id] });
+                    if (selectedGroup) {
+                        queryClient.invalidateQueries({ queryKey: ['messages', 'conv', selectedGroup.id] });
+                    } else {
+                        queryClient.invalidateQueries({ queryKey: ['messages', selectedContact!.id] });
+                    }
                 } catch (err) {
                     console.error('Failed to send video message:', err);
                     const responseData = (err as { response?: { data?: { message?: string; errors?: Array<{ error?: string }> } } })
@@ -352,15 +428,52 @@ export default function Layout() {
 
     const handleSelectContact = (u: UserResponse) => {
         stopTyping();
+        setSelectedGroup(undefined);
         setSelectedContact(u);
+    };
+
+    const handleSelectGroup = (group: Conversation) => {
+        stopTyping();
+        setSelectedContact(undefined);
+        setSelectedGroup(group);
+    };
+
+    const handleCreateGroup = async (name: string, memberIds: string[]) => {
+        const conversation = await reqCreateGroup(name, memberIds);
+        setShowCreateGroup(false);
+        await refetchConversations();
+        handleSelectGroup({
+            id: conversation.id,
+            isGroup: true,
+            name: conversation.name,
+            members: (conversation.member_ids ?? []).map((id: string) => {
+                const u = allUsers.find((u) => String(u.id) === String(id));
+                return { id, username: u?.username ?? '', profile_photo: u?.profile_photo };
+            }),
+        });
     };
 
     return (
         <div className="layout-shell">
-            <Sidebar onSelectContact={handleSelectContact} />
+            <Sidebar
+                onSelectContact={handleSelectContact}
+                onSelectGroup={handleSelectGroup}
+                onCreateGroupClick={() => setShowCreateGroup(true)}
+                conversations={conversations}
+                activeContactId={selectedContact?.id ? String(selectedContact.id) : undefined}
+                activeGroupId={selectedGroup?.id}
+            />
+
+            {showCreateGroup && (
+                <CreateGroupModal
+                    contacts={contactsList}
+                    onClose={() => setShowCreateGroup(false)}
+                    onCreate={handleCreateGroup}
+                />
+            )}
 
             <main className="layout-main">
-                {selectedContact && <ChatHeader contact={contact} isTyping={isTyping} />}
+                {(selectedContact || selectedGroup) && <ChatHeader contact={contact} isTyping={isTyping} />}
                 {selectedContact && <CallPanel contactId={selectedContact.id} />}
 
                 <div className="layout-user-menu">
@@ -372,6 +485,7 @@ export default function Layout() {
                             outletInput,
                             setOutletInput,
                             selectedContact,
+                            selectedConversation: selectedGroup,
                             isUploading,
                             uploadProgress,
                             uploadedBytes,
@@ -380,7 +494,7 @@ export default function Layout() {
                         }} />
                     </div>
 
-                    {selectedContact && (
+                    {(selectedContact || selectedGroup) && (
                         <form
                             onSubmit={(e) => {
                                 e.preventDefault();
@@ -395,19 +509,21 @@ export default function Layout() {
                                 </div>
                             )}
 
-                            <button
-                                type="button"
-                                onClick={() => setIsEncrypted(!isEncrypted)}
-                                disabled={!selectedContact || sendMutation.isPending}
-                                title={isEncrypted ? 'Encrypted chat' : 'Normal chat'}
-                                className="composer-icon-button"
-                            >
-                                {isEncrypted ? (
-                                    <Lock size={18} />
-                                ) : (
-                                    <MessageCircle size={18} />
-                                )}
-                            </button>
+                            {!selectedGroup && (
+                                <button
+                                    type="button"
+                                    onClick={() => setIsEncrypted(!isEncrypted)}
+                                    disabled={!selectedContact || sendMutation.isPending}
+                                    title={isEncrypted ? 'Encrypted chat' : 'Normal chat'}
+                                    className="composer-icon-button"
+                                >
+                                    {isEncrypted ? (
+                                        <Lock size={18} />
+                                    ) : (
+                                        <MessageCircle size={18} />
+                                    )}
+                                </button>
+                            )}
 
                             <input
                                 ref={fileInputRef}
@@ -421,7 +537,7 @@ export default function Layout() {
                             <button
                                 type="button"
                                 onClick={() => fileInputRef.current?.click()}
-                                disabled={!selectedContact || isUploading || isRecording || isVideoRecording}
+                                disabled={(!selectedContact && !selectedGroup) || isUploading || isRecording || isVideoRecording}
                                 className="composer-file-button"
                             >
                                 {isUploading ? (
@@ -435,7 +551,7 @@ export default function Layout() {
                             <button
                                 type="button"
                                 onClick={handleVoiceMessage}
-                                disabled={!selectedContact || isUploading || isVideoRecording}
+                                disabled={(!selectedContact && !selectedGroup) || isUploading || isVideoRecording}
                                 title={isRecording ? 'Stop recording' : 'Record voice message'}
                                 className={`recording-button${isRecording ? ' recording-button--active' : ''}`}
                             >
@@ -445,7 +561,7 @@ export default function Layout() {
                             <button
                                 type="button"
                                 onClick={handleVideoMessage}
-                                disabled={!selectedContact || isUploading || isRecording}
+                                disabled={(!selectedContact && !selectedGroup) || isUploading || isRecording}
                                 title={isVideoRecording ? 'Stop video recording' : 'Record video message'}
                                 className={`recording-button${isVideoRecording ? ' recording-button--active' : ''}`}
                             >
@@ -472,13 +588,13 @@ export default function Layout() {
                                 value={outletInput}
                                 onChange={handleInputChange}
                                 placeholder="Type here..."
-                                disabled={!selectedContact}
+                                disabled={!selectedContact && !selectedGroup}
                                 className="composer-text-input"
                             />
                             <button
                                 type="submit"
-                                disabled={!outletInput.trim() || !selectedContact || sendMutation.isPending}
-                                className={`composer-send-button${outletInput.trim() && selectedContact ? ' composer-send-button--ready' : ''}`}
+                                disabled={!outletInput.trim() || (!selectedContact && !selectedGroup) || sendMutation.isPending}
+                                className={`composer-send-button${outletInput.trim() && (selectedContact || selectedGroup) ? ' composer-send-button--ready' : ''}`}
                             >
                                 {sendMutation.isPending ? 'Sending...' : <Send size={16} />}
                             </button>

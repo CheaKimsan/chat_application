@@ -37,6 +37,10 @@ func (h *MessageHandler) RegisterRoutes(router *gin.RouterGroup) {
 	router.DELETE("/:id", h.Delete)
 	router.PATCH("/:id/read", h.MarkRead)
 	router.POST("/:messageId/upload", h.Upload)
+
+	router.GET("/conversation/:id", h.GetConversationByID) // NEW
+	router.POST("/conversations", h.CreateGroup)           // NEW
+	router.GET("/conversations", h.ListConversations)
 }
 
 func (h *MessageHandler) Edit(c *gin.Context) {
@@ -201,4 +205,53 @@ func (h *MessageHandler) Upload(c *gin.Context) {
 			"errors":      failedResp,
 		})
 	}
+}
+
+func (h *MessageHandler) GetConversationByID(c *gin.Context) {
+	callerID, _ := middleware.CallerFromContext(c)
+	conversationID := c.Param("id")
+
+	isMember, err := h.messages.IsConversationMember(c.Request.Context(), conversationID, callerID)
+	if err != nil || !isMember {
+		c.JSON(http.StatusForbidden, gin.H{"message": "not a member of this conversation"})
+		return
+	}
+
+	messages, err := h.messages.GetConversationByID(c.Request.Context(), conversationID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"message": "failed to fetch messages"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"messages": messages})
+}
+
+func (h *MessageHandler) CreateGroup(c *gin.Context) {
+	callerID, _ := middleware.CallerFromContext(c)
+
+	var req struct {
+		Name      string   `json:"name" binding:"required"`
+		MemberIDs []string `json:"member_ids" binding:"required,min=1"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	conv, err := h.messages.CreateGroup(c.Request.Context(), callerID, req.Name, req.MemberIDs)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"message": "failed to create group", "error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusCreated, gin.H{"conversation": conv})
+}
+
+func (h *MessageHandler) ListConversations(c *gin.Context) {
+	callerID, _ := middleware.CallerFromContext(c)
+
+	convs, err := h.messages.ListConversations(c.Request.Context(), callerID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"message": "failed to fetch conversations", "error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"conversations": convs})
 }

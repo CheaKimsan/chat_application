@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"golang-jwt-project/internal/models"
 	"log"
 )
@@ -20,28 +21,28 @@ func (r *MessageRepository) GetConversation(ctx context.Context, callerID, other
 	rows, err := r.db.QueryContext(
 		ctx,
 		`SELECT
-       m.id, m.from_user, m.to_user, m.body, m.nonce, m.created_at, m.read_at,
-       COALESCE(
-           json_agg(
-               json_build_object(
-                   'id', a.id,
-                   'message_id', a.message_id::text,
-                   'type', a.type,
-                   'url', a.url,
-                   'filename', a.filename,
-                   'mime_type', a.mime_type,
-                   'size_bytes', a.size_bytes,
-                   'created_at', a.created_at
-               ) ORDER BY a.created_at
-           ) FILTER (WHERE a.id IS NOT NULL),
-           '[]'
-       ) AS attachments
-   FROM messages m
-   LEFT JOIN attachments a ON a.message_id = m.id
-   WHERE (m.from_user = $1 AND m.to_user = $2)
-      OR (m.from_user = $2 AND m.to_user = $1)
-   GROUP BY m.id
-   ORDER BY m.created_at ASC`,
+		m.id, m.from_user, m.to_user, m.body, m.nonce, m.created_at, m.read_at,
+		COALESCE(
+			json_agg(
+				json_build_object(
+					'id', a.id,
+					'message_id', a.message_id::text,
+					'type', a.type,
+					'url', a.url,
+					'filename', a.filename,
+					'mime_type', a.mime_type,
+					'size_bytes', a.size_bytes,
+					'created_at', a.created_at
+				) ORDER BY a.created_at
+			) FILTER (WHERE a.id IS NOT NULL),
+			'[]'
+		) AS attachments
+	FROM messages m
+	LEFT JOIN attachments a ON a.message_id = m.id
+	WHERE (m.from_user = $1 AND m.to_user = $2)
+		OR (m.from_user = $2 AND m.to_user = $1)
+	GROUP BY m.id
+	ORDER BY m.created_at ASC`,
 		callerID,
 		otherID,
 	)
@@ -77,8 +78,8 @@ func (r *MessageRepository) Create(ctx context.Context, fromUser, toUser string,
 	var msg models.MessageResponse
 	err := r.db.QueryRowContext(ctx,
 		`INSERT INTO messages (from_user, to_user, body, nonce)
-		 VALUES ($1, $2, $3, $4)
-		 RETURNING id, from_user, to_user, body, nonce, created_at, read_at`,
+			VALUES ($1, $2, $3, $4)
+			RETURNING id, from_user, to_user, body, nonce, created_at, read_at`,
 		fromUser, toUser, ciphertext, nonce,
 	).Scan(&msg.ID, &msg.FromUser, &msg.ToUser, &msg.Body, &msg.Nonce, &msg.CreatedAt, &msg.ReadAt)
 	if err != nil {
@@ -91,9 +92,9 @@ func (r *MessageRepository) Update(ctx context.Context, messageID, fromUser stri
 	var msg models.MessageResponse
 	err := r.db.QueryRowContext(ctx,
 		`UPDATE messages
-		 SET body = $1, nonce = $2
-		 WHERE id = $3 AND from_user = $4
-		 RETURNING id, from_user, to_user, body, nonce, created_at, read_at`,
+			SET body = $1, nonce = $2
+			WHERE id = $3 AND from_user = $4
+			RETURNING id, from_user, to_user, body, nonce, created_at, read_at`,
 		ciphertext, nonce, messageID, fromUser,
 	).Scan(&msg.ID, &msg.FromUser, &msg.ToUser, &msg.Body, &msg.Nonce, &msg.CreatedAt, &msg.ReadAt)
 	return msg, msg.ToUser, err
@@ -115,8 +116,8 @@ func (r *MessageRepository) MarkRead(ctx context.Context, msgID, callerID string
 	var fromUser string
 	err := r.db.QueryRowContext(ctx,
 		`UPDATE messages SET read_at = now()
-		 WHERE id = $1 AND to_user = $2 AND read_at IS NULL
-		 RETURNING from_user`,
+			WHERE id = $1 AND to_user = $2 AND read_at IS NULL
+			RETURNING from_user`,
 		msgID, callerID,
 	).Scan(&fromUser)
 	if err != nil {
@@ -138,4 +139,185 @@ func (r *MessageRepository) GetToUser(ctx context.Context, messageID string) (st
 	var toUser string
 	err := r.db.QueryRowContext(ctx, "SELECT to_user FROM messages WHERE id = $1", messageID).Scan(&toUser)
 	return toUser, err
+}
+
+// FindOrCreateDirectConversation returns the conversation_id for the 1:1
+// chat between userA and userB, creating it if it doesn't exist yet.
+func (r *MessageRepository) FindOrCreateDirectConversation(ctx context.Context, userA, userB string) (string, error) {
+	var conversationID string
+	err := r.db.QueryRowContext(ctx, `
+			SELECT c.id FROM conversations c
+			JOIN conversation_members m1 ON m1.conversation_id = c.id AND m1.user_id = $1
+			JOIN conversation_members m2 ON m2.conversation_id = c.id AND m2.user_id = $2
+			WHERE c.is_group = false
+			LIMIT 1
+		`, userA, userB).Scan(&conversationID)
+	if err == nil {
+		return conversationID, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return "", err
+	}
+
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return "", err
+	}
+	defer tx.Rollback()
+
+	if err := tx.QueryRowContext(ctx,
+		`INSERT INTO conversations (is_group, created_by) VALUES (false, $1) RETURNING id`,
+		userA,
+	).Scan(&conversationID); err != nil {
+		return "", err
+	}
+	if _, err := tx.ExecContext(ctx,
+		`INSERT INTO conversation_members (conversation_id, user_id) VALUES ($1, $2), ($1, $3)`,
+		conversationID, userA, userB,
+	); err != nil {
+		return "", err
+	}
+	if err := tx.Commit(); err != nil {
+		return "", err
+	}
+	return conversationID, nil
+}
+
+func (r *MessageRepository) CreateConversation(ctx context.Context, createdBy, name string, isGroup bool, memberIDs []string) (models.ConversationResponse, error) {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return models.ConversationResponse{}, err
+	}
+	defer tx.Rollback()
+
+	var conv models.ConversationResponse
+	if err := tx.QueryRowContext(ctx,
+		`INSERT INTO conversations (is_group, name, created_by) VALUES ($1, $2, $3) RETURNING id, is_group, name, created_by, created_at`,
+		isGroup, name, createdBy,
+	).Scan(&conv.ID, &conv.IsGroup, &conv.Name, &conv.CreatedBy, &conv.CreatedAt); err != nil {
+		return models.ConversationResponse{}, err
+	}
+
+	for _, memberID := range memberIDs {
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO conversation_members (conversation_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+			conv.ID, memberID,
+		); err != nil {
+			return models.ConversationResponse{}, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return models.ConversationResponse{}, err
+	}
+	conv.MemberIDs = memberIDs
+	return conv, nil
+}
+
+func (r *MessageRepository) IsConversationMember(ctx context.Context, conversationID, userID string) (bool, error) {
+	var exists bool
+	err := r.db.QueryRowContext(ctx,
+		`SELECT EXISTS(SELECT 1 FROM conversation_members WHERE conversation_id = $1 AND user_id = $2)`,
+		conversationID, userID,
+	).Scan(&exists)
+	return exists, err
+}
+
+func (r *MessageRepository) GetConversationMembers(ctx context.Context, conversationID string) ([]string, error) {
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT user_id FROM conversation_members WHERE conversation_id = $1`, conversationID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var members []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		members = append(members, id)
+	}
+	return members, rows.Err()
+}
+
+// CreateInConversation replaces Create — inserts a message against a
+// conversation_id instead of a single to_user.
+func (r *MessageRepository) CreateInConversation(ctx context.Context, fromUser, conversationID string, body, ciphertext, nonce *string) (models.MessageResponse, error) {
+	var msg models.MessageResponse
+	err := r.db.QueryRowContext(ctx, `
+			INSERT INTO messages (from_user, conversation_id, body, nonce, created_at)
+			VALUES ($1, $2, COALESCE($3, $4), $5, now())
+			RETURNING id, from_user, conversation_id, body, nonce, created_at
+		`, fromUser, conversationID, body, ciphertext, nonce).Scan(
+		&msg.ID, &msg.FromUser, &msg.ConversationID, &msg.Body, &msg.Nonce, &msg.CreatedAt,
+	)
+	return msg, err
+}
+
+func (r *MessageRepository) GetByConversationID(ctx context.Context, conversationID string) ([]models.MessageResponse, error) {
+	rows, err := r.db.QueryContext(ctx, `
+			SELECT id, from_user, conversation_id, body, nonce, created_at, read_at
+			FROM messages WHERE conversation_id = $1 ORDER BY created_at ASC
+		`, conversationID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []models.MessageResponse
+	for rows.Next() {
+		var m models.MessageResponse
+		if err := rows.Scan(&m.ID, &m.FromUser, &m.ConversationID, &m.Body, &m.Nonce, &m.CreatedAt, &m.ReadAt); err != nil {
+			return nil, err
+		}
+		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+
+// GetConversationAndSender is used by NotifyAttachments to look up a
+// message's conversation_id + original sender, replacing GetToUser.
+func (r *MessageRepository) GetConversationAndSender(ctx context.Context, messageID string) (conversationID, fromUser string, err error) {
+	err = r.db.QueryRowContext(ctx,
+		`SELECT conversation_id, from_user FROM messages WHERE id = $1`, messageID,
+	).Scan(&conversationID, &fromUser)
+	return
+}
+
+func (r *MessageRepository) ListConversationsForUser(ctx context.Context, userID string) ([]models.ConversationResponse, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT c.id, c.is_group, c.name, c.created_by, c.created_at
+		FROM conversations c
+		JOIN conversation_members cm ON cm.conversation_id = c.id
+		WHERE cm.user_id = $1
+		ORDER BY c.created_at DESC
+	`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []models.ConversationResponse
+	for rows.Next() {
+		var conv models.ConversationResponse
+		if err := rows.Scan(&conv.ID, &conv.IsGroup, &conv.Name, &conv.CreatedBy, &conv.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, conv)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	// N+1, but conversation lists are small and this reuses the existing method.
+	for i := range out {
+		memberIDs, err := r.GetConversationMembers(ctx, out[i].ID)
+		if err != nil {
+			return nil, err
+		}
+		out[i].MemberIDs = memberIDs
+	}
+
+	return out, nil
 }

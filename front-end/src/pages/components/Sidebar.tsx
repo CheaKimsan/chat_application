@@ -3,7 +3,8 @@ import { useAuthStore } from "../../store/auth.store";
 import { useQuery } from "@tanstack/react-query";
 import { UserResponse } from "../../components/user/core/model";
 import { reqGetUsers } from "../../components/user/core/request";
-import { Contact2, Search } from "lucide-react";
+import { Contact2, Plus, Search, Users } from "lucide-react";
+import { Conversation } from "./Layout";
 
 const C = {
     bg: "#0F1113",
@@ -15,9 +16,14 @@ const C = {
     accentDim: "rgba(79, 169, 160, 0.12)",
 };
 
-type SidebarProps = {
-    onSelectContact?: (user: UserResponse) => void;
-};
+interface SidebarProps {
+    onSelectContact: (u: UserResponse) => void;
+    onSelectGroup?: (group: Conversation) => void;
+    onCreateGroupClick?: () => void;
+    conversations?: Conversation[];
+    activeContactId?: string;
+    activeGroupId?: string;
+}
 
 type TypingPayload = {
     from_user: string;
@@ -34,8 +40,6 @@ function useTypingUsers(currentUserId: string | number | undefined) {
         const handler = (e: Event) => {
             const detail = (e as CustomEvent<TypingPayload>).detail;
             if (!detail) return;
-
-            // Only care about typing events directed at me
             if (String(detail.to_user) !== String(currentUserId)) return;
 
             setTypingUsers((prev) => {
@@ -78,7 +82,6 @@ function usePresenceUsers() {
         const handleSnapshot = (e: Event) => {
             const detail = (e as CustomEvent<{ users?: Array<string | number> }>).detail;
             if (!detail?.users) return;
-
             setOnlineUsers(new Set(detail.users.map(String)));
         };
 
@@ -93,9 +96,23 @@ function usePresenceUsers() {
     return onlineUsers;
 }
 
-export default function Sidebar({ onSelectContact }: SidebarProps) {
+function initialsOf(name: string) {
+    return name
+        .split(" ")
+        .map((part) => part[0]?.toUpperCase())
+        .join("")
+        .slice(0, 2);
+}
+
+export default function Sidebar({
+    onSelectContact,
+    onSelectGroup,
+    onCreateGroupClick,
+    conversations = [],
+    activeContactId,
+    activeGroupId,
+}: SidebarProps) {
     const user = useAuthStore((s) => s.user);
-    const [selectedUserId, setSelectedUserId] = useState<string | number | null>(null);
     const [search, setSearch] = useState("");
     const onlineUsers = usePresenceUsers();
 
@@ -110,6 +127,7 @@ export default function Sidebar({ onSelectContact }: SidebarProps) {
 
     const typingUsers = useTypingUsers(user?.id);
 
+    const groups = conversations.filter((c) => c.isGroup);
 
     const contactRows = users
         .filter((u) => u.id !== user?.id)
@@ -123,17 +141,12 @@ export default function Sidebar({ onSelectContact }: SidebarProps) {
                 : { label: "Offline", color: C.muted },
         }));
 
-    const handleSelectContact = (u: UserResponse) => {
-        setSelectedUserId(u.id);
-        onSelectContact?.(u);
-    };
-
-    const title = "Contacts";
-    const rows = contactRows;
+    const groupRows = groups.filter((g) =>
+        (g.name ?? "Group").toLowerCase().includes(search.toLowerCase())
+    );
 
     return (
         <div style={{ display: "flex", height: "100vh", overflow: "hidden" }}>
-
             <section
                 style={{
                     width: 300,
@@ -153,9 +166,8 @@ export default function Sidebar({ onSelectContact }: SidebarProps) {
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
                         <div style={{ fontWeight: 700, fontFamily: "'Space Grotesk', sans-serif", fontSize: 15, display: "flex", alignItems: "center", gap: 4 }}>
                             <Contact2 size={22} />
-                            {title}
+                            Messages
                         </div>
-                        <span style={{ color: C.muted, fontSize: 11 }}>{rows.length}</span>
                     </div>
                     <label
                         style={{
@@ -174,8 +186,8 @@ export default function Sidebar({ onSelectContact }: SidebarProps) {
                         <input
                             value={search}
                             onChange={(e) => setSearch(e.target.value)}
-                            placeholder="Search contacts"
-                            aria-label="Search contacts"
+                            placeholder="Search"
+                            aria-label="Search"
                             style={{
                                 width: "100%",
                                 border: "none",
@@ -189,25 +201,137 @@ export default function Sidebar({ onSelectContact }: SidebarProps) {
                 </div>
 
                 <div style={{ flex: 1, overflowY: "auto", padding: 8 }}>
+                    {/* Groups section */}
+                    <div style={{ padding: "4px 8px 6px" }}>
+                        <div
+                            style={{
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "space-between",
+                                marginBottom: 6,
+                            }}
+                        >
+                            <span style={{ fontSize: 12, fontWeight: 600, color: C.muted }}>
+                                Groups {groupRows.length > 0 && `· ${groupRows.length}`}
+                            </span>
+                            <button
+                                type="button"
+                                onClick={onCreateGroupClick}
+                                style={{
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: 4,
+                                    padding: "4px 8px",
+                                    borderRadius: 999,
+                                    background: C.accentDim,
+                                    border: `1px solid ${C.accent}`,
+                                    color: C.accent,
+                                    fontSize: 11,
+                                    fontWeight: 600,
+                                    cursor: "pointer",
+                                }}
+                            >
+                                <Plus size={12} />
+                                New
+                            </button>
+                        </div>
+
+                        {groupRows.length === 0 ? (
+                            <div style={{ padding: "8px 6px", fontSize: 12, color: C.muted }}>
+                                No groups yet — start one above.
+                            </div>
+                        ) : (
+                            groupRows.map((g) => {
+                                const isSelected = g.id === activeGroupId;
+                                const name = g.name ?? "Group";
+
+                                return (
+                                    <button
+                                        key={g.id}
+                                        onClick={() => onSelectGroup?.(g)}
+                                        style={{
+                                            width: "100%",
+                                            display: "flex",
+                                            alignItems: "center",
+                                            gap: 10,
+                                            padding: "8px 10px",
+                                            borderRadius: 8,
+                                            background: isSelected ? C.accentDim : "transparent",
+                                            border: "none",
+                                            textAlign: "left",
+                                            cursor: "pointer",
+                                            color: C.text,
+                                        }}
+                                        onMouseEnter={(e) => {
+                                            if (!isSelected) e.currentTarget.style.background = "#191c1f";
+                                        }}
+                                        onMouseLeave={(e) => {
+                                            if (!isSelected) e.currentTarget.style.background = "transparent";
+                                        }}
+                                        aria-current={isSelected}
+                                    >
+                                        <span
+                                            style={{
+                                                width: 34,
+                                                height: 34,
+                                                flexShrink: 0,
+                                                borderRadius: 10,
+                                                background: "#20242A",
+                                                border: `1px solid ${C.border}`,
+                                                display: "inline-flex",
+                                                alignItems: "center",
+                                                justifyContent: "center",
+                                                overflow: "hidden",
+                                                color: C.accent,
+                                            }}
+                                        >
+                                            {g.profile_photo ? (
+                                                <img
+                                                    src={g.profile_photo}
+                                                    alt=""
+                                                    style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                                                />
+                                            ) : (
+                                                <Users size={16} />
+                                            )}
+                                        </span>
+
+                                        <span style={{ minWidth: 0, display: "flex", flexDirection: "column", gap: 2 }}>
+                                            <span style={{ fontSize: 13, fontWeight: 600 }}>{name}</span>
+                                            <span style={{ fontSize: 11, color: C.muted }}>
+                                                {g.members?.length ?? 0} member{(g.members?.length ?? 0) === 1 ? "" : "s"}
+                                            </span>
+                                        </span>
+                                    </button>
+                                );
+                            })
+                        )}
+                    </div>
+
+                    <div style={{ height: 1, background: C.border, margin: "6px 8px 10px" }} />
+
+                    {/* Contacts section */}
+                    <div style={{ padding: "0 8px 4px" }}>
+                        <span style={{ fontSize: 12, fontWeight: 600, color: C.muted }}>
+                            Contacts {contactRows.length > 0 && `· ${contactRows.length}`}
+                        </span>
+                    </div>
+
                     {isLoading ? (
                         <div style={{ padding: 12, fontSize: 13, color: C.muted }}>Loading contacts…</div>
                     ) : error ? (
                         <div style={{ padding: 12, fontSize: 13, color: "#E27D7D" }}>Failed to load contacts</div>
-                    ) : rows.length === 0 ? (
+                    ) : contactRows.length === 0 ? (
                         <div style={{ padding: 12, fontSize: 13, color: C.muted }}>No contacts found</div>
                     ) : (
-                        rows.map((row, i) => {
-                            const isSelected = row.user?.id === selectedUserId;
+                        contactRows.map((row, i) => {
+                            const isSelected = row.user?.id === activeContactId;
                             const isTyping = row.user ? typingUsers.has(String(row.user.id)) : false;
 
                             return (
                                 <button
                                     key={row.user?.id ?? i}
-                                    onClick={() => {
-                                        if (row.user) {
-                                            handleSelectContact(row.user);
-                                        }
-                                    }}
+                                    onClick={() => row.user && onSelectContact(row.user)}
                                     style={{
                                         width: "100%",
                                         display: "flex",
@@ -253,11 +377,7 @@ export default function Sidebar({ onSelectContact }: SidebarProps) {
                                                 style={{ width: "100%", height: "100%", objectFit: "cover" }}
                                             />
                                         ) : (
-                                            row.primary
-                                                .split(" ")
-                                                .map((part) => part[0]?.toUpperCase())
-                                                .join("")
-                                                .slice(0, 2)
+                                            initialsOf(row.primary)
                                         )}
                                     </span>
 
@@ -283,7 +403,7 @@ export default function Sidebar({ onSelectContact }: SidebarProps) {
                         })
                     )}
                 </div>
-            </section >
-        </div >
+            </section>
+        </div>
     );
 }
