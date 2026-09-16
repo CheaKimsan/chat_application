@@ -1,7 +1,6 @@
 import { useState, FormEvent, ChangeEvent, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Eye, EyeOff, Lock, User } from "lucide-react";
-import Logo from "../../../../src/assets/image/message-image.png";
+import { Eye, EyeOff, Lock, MessageSquare, User } from "lucide-react";
 import { FormErrors, FormData } from "./core/login.model";
 import { validateLogin, handleLoginSubmit } from "./core/action";
 
@@ -49,98 +48,161 @@ export default function LoginForm() {
     }, []);
 
     return (
-        <div className="min-h-screen flex items-center justify-center bg-slate-950 px-4">
-            <div className="w-full max-w-md bg-slate-800 rounded-2xl shadow-lg p-8">
-                <div className="mb-8 text-center">
-                    <div className="w-24 bg-indigo-600 rounded-xl flex items-center justify-center mx-auto mb-4">
-                        <img src={Logo} alt="" />
+        <div className="min-h-screen flex items-center justify-center bg-[#0B0C0D] px-4 relative overflow-hidden">
+            {/* Ambient glow background */}
+            <div
+                aria-hidden="true"
+                className="pointer-events-none absolute -top-40 left-1/2 -translate-x-1/2 w-[600px] h-[600px] rounded-full bg-[#4FA9A0]/10 blur-[120px]"
+            />
+            <div
+                aria-hidden="true"
+                className="pointer-events-none absolute -bottom-40 right-0 w-[500px] h-[500px] rounded-full bg-[#4FA9A0]/[0.06] blur-[120px]"
+            />
+
+            <div className="relative w-full max-w-md">
+                {/* Card */}
+                <div className="bg-[#131518] border border-[#23262A] rounded-3xl shadow-[0_24px_64px_rgba(0,0,0,0.5)] p-8 sm:p-10">
+
+                    {/* Header */}
+                    <div className="mb-8 text-center">
+                        <div className="w-20 h-20 bg-gradient-to-br from-[#5FBDB2] to-[#4FA9A0] rounded-2xl flex items-center justify-center mx-auto mb-5 shadow-[0_8px_24px_rgba(79,169,160,0.35)]">
+                            <MessageSquare className="w-10 h-10 text-[#0B0C0D]" strokeWidth={2.2} />
+                        </div>
+                        <h1 className="text-2xl font-semibold text-[#E7E3DA] tracking-tight [font-family:'Space_Grotesk',sans-serif]">
+                            Welcome back
+                        </h1>
+                        <p className="text-[#8B92A0] text-sm mt-1.5">
+                            Sign in to continue to your account
+                        </p>
+
+                        {/* Live clock */}
+                        <div className="mt-4 inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-[#1A1D21] border border-[#23262A]">
+                            <span className="w-1.5 h-1.5 rounded-full bg-[#4FA9A0] animate-pulse" />
+                            <span className="text-[#8B92A0] text-xs tabular-nums tracking-wide">
+                                {time.toLocaleTimeString()}
+                            </span>
+                        </div>
                     </div>
-                    <h1 className="text-2xl font-semibold text-white">Welcome back</h1>
-                    <p className="text-white text-sm mt-1">Sign in to your account</p>
-                    <p className="text-slate-400 text-md mt-2 tabular-nums ">
-                        {time.toLocaleTimeString()}
-                    </p>
+
+                    <form onSubmit={handleSubmit} className="space-y-5" noValidate>
+                        {/* Form-level error */}
+                        {errors.form && (
+                            <div className="bg-[#450A0A]/60 border border-[#7F1D1D] text-[#FECACA] text-sm rounded-xl px-4 py-3 flex items-start gap-2.5">
+                                <span className="w-1.5 h-1.5 rounded-full bg-[#E27D7D] mt-1.5 flex-shrink-0" />
+                                <span>{errors.form}</span>
+                            </div>
+                        )}
+
+                        {/* Username */}
+                        <div>
+                            <label htmlFor="username" className="block text-xs font-semibold text-[#8B92A0] uppercase tracking-wider mb-2">
+                                Username
+                            </label>
+                            <div className="relative group">
+                                <User className="w-4 h-4 text-[#565C66] absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none transition-colors group-focus-within:text-[#4FA9A0]" />
+                                <input
+                                    id="username"
+                                    name="username"
+                                    type="text"
+                                    value={formData.username}
+                                    onChange={handleChange}
+                                    placeholder="yourusername"
+                                    className={`w-full pl-10 pr-4 py-3 rounded-xl bg-[#0B0C0D] border text-sm text-[#E7E3DA] placeholder-[#565C66] focus:outline-none focus:ring-2 focus:ring-[#4FA9A0]/30 focus:border-[#4FA9A0] transition-all duration-200 ${errors.username
+                                        ? "border-[#E27D7D] focus:border-[#E27D7D] focus:ring-[#E27D7D]/25"
+                                        : "border-[#23262A] hover:border-[#2A2D32]"
+                                        }`}
+                                />
+                            </div>
+                            {errors.username && (
+                                <p className="text-[#E27D7D] text-xs mt-1.5 pl-1">{errors.username}</p>
+                            )}
+                        </div>
+
+                        {/* Password */}
+                        <div>
+                            <label htmlFor="password" className="block text-xs font-semibold text-[#8B92A0] uppercase tracking-wider mb-2">
+                                Password
+                            </label>
+                            <div className="relative group">
+                                <Lock className="w-4 h-4 text-[#565C66] absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none transition-colors group-focus-within:text-[#4FA9A0]" />
+                                <input
+                                    id="password"
+                                    name="password"
+                                    type={showPassword ? "text" : "password"}
+                                    value={formData.password}
+                                    onChange={handleChange}
+                                    placeholder="••••••••"
+                                    className={`w-full pl-10 pr-11 py-3 rounded-xl bg-[#0B0C0D] border text-sm text-[#E7E3DA] placeholder-[#565C66] focus:outline-none focus:ring-2 focus:ring-[#4FA9A0]/30 focus:border-[#4FA9A0] transition-all duration-200 ${errors.password
+                                        ? "border-[#E27D7D] focus:border-[#E27D7D] focus:ring-[#E27D7D]/25"
+                                        : "border-[#23262A] hover:border-[#2A2D32]"
+                                        }`}
+                                />
+                                <button
+                                    type="button"
+                                    onClick={() => setShowPassword((prev) => !prev)}
+                                    className="absolute right-3 top-1/2 -translate-y-1/2 p-1.5 rounded-lg text-[#565C66] hover:text-[#4FA9A0] hover:bg-[#4FA9A0]/10 transition-colors"
+                                    tabIndex={-1}
+                                    aria-label={showPassword ? "Hide password" : "Show password"}
+                                >
+                                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                                </button>
+                            </div>
+                            {errors.password && (
+                                <p className="text-[#E27D7D] text-xs mt-1.5 pl-1">{errors.password}</p>
+                            )}
+                        </div>
+
+                        {/* Remember / Forgot */}
+                        <div className="flex items-center justify-between text-sm pt-1">
+                            <label className="flex items-center gap-2 text-[#8B92A0] cursor-pointer select-none hover:text-[#E7E3DA] transition-colors">
+                                <input
+                                    type="checkbox"
+                                    className="w-4 h-4 rounded border-[#23262A] bg-[#0B0C0D] text-[#4FA9A0] focus:ring-2 focus:ring-[#4FA9A0]/40 focus:ring-offset-0 cursor-pointer accent-[#4FA9A0]"
+                                />
+                                <span className="text-xs">Remember me</span>
+                            </label>
+                            <a
+                                href="/forgot-password"
+                                className="text-[#4FA9A0] hover:text-[#5FBDB2] text-xs font-medium transition-colors"
+                            >
+                                Forgot password?
+                            </a>
+                        </div>
+
+                        {/* Submit */}
+                        <button
+                            type="submit"
+                            disabled={isSubmitting}
+                            className="w-full relative mt-2 bg-gradient-to-b from-[#5FBDB2] to-[#4FA9A0] hover:from-[#6FCBC0] hover:to-[#5FBDB2] disabled:from-[#2A2D32] disabled:to-[#2A2D32] disabled:cursor-not-allowed text-[#0B0C0D] disabled:text-[#565C66] font-semibold text-sm py-3 rounded-xl transition-all duration-200 shadow-[0_8px_20px_rgba(79,169,160,0.25)] hover:shadow-[0_12px_28px_rgba(79,169,160,0.4)] hover:-translate-y-0.5 active:translate-y-0 disabled:shadow-none disabled:hover:translate-y-0"
+                        >
+                            {isSubmitting ? (
+                                <span className="inline-flex items-center gap-2 justify-center">
+                                    <span className="w-3.5 h-3.5 border-2 border-current/30 border-t-current rounded-full animate-spin" />
+                                    Signing in...
+                                </span>
+                            ) : (
+                                "Sign in"
+                            )}
+                        </button>
+                    </form>
+
+                    {/* Footer */}
+                    <div className="mt-8 pt-6 border-t border-[#23262A] text-center">
+                        <p className="text-sm text-[#8B92A0]">
+                            Don't have an account?{" "}
+                            <Link
+                                to="/register"
+                                className="text-[#4FA9A0] hover:text-[#5FBDB2] font-medium transition-colors"
+                            >
+                                Sign up
+                            </Link>
+                        </p>
+                    </div>
                 </div>
 
-                <form onSubmit={handleSubmit} className="space-y-5" noValidate>
-                    {errors.form && (
-                        <div className="bg-red-50 border border-red-200 text-red-600 text-sm rounded-lg px-4 py-2">
-                            {errors.form}
-                        </div>
-                    )}
-
-                    <div>
-                        <label htmlFor="username" className="block text-sm font-medium text-white mb-1.5">
-                            Username
-                        </label>
-                        <div className="relative">
-                            <User className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                            <input
-                                id="username"
-                                name="username"
-                                type="text"
-                                value={formData.username}
-                                onChange={handleChange}
-                                placeholder="yourusername"
-                                className={`w-full pl-10 pr-4 py-2.5 rounded-lg border text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition ${errors.username ? "border-red-400" : "border-slate-300"
-                                }`}
-                            />
-                        </div>
-                        {errors.username && <p className="text-red-500 text-xs mt-1">{errors.username}</p>}
-                    </div>
-
-                    <div>
-                        <label htmlFor="password" className="block text-sm font-medium text-white mb-1.5">
-                            Password
-                        </label>
-                        <div className="relative">
-                            <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                            <input
-                                id="password"
-                                name="password"
-                                type={showPassword ? "text" : "password"}
-                                value={formData.password}
-                                onChange={handleChange}
-                                placeholder="••••••••"
-                                className={`w-full pl-10 pr-10 py-2.5 rounded-lg border text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition ${errors.password ? "border-red-400" : "border-slate-300"
-                                }`}
-                            />
-                            <button
-                                type="button"
-                                onClick={() => setShowPassword((prev) => !prev)}
-                                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
-                                tabIndex={-1}
-                            >
-                                {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                            </button>
-                        </div>
-                        {errors.password && <p className="text-red-500 text-xs mt-1">{errors.password}</p>}
-                    </div>
-
-                    <div className="flex items-center justify-between text-sm">
-                        <label className="flex items-center gap-2 text-slate-600">
-                            <input type="checkbox" className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500" />
-                            Remember me
-                        </label>
-                        <a href="/forgot-password" className="text-indigo-600 hover:text-indigo-700 font-medium">
-                            Forgot password?
-                        </a>
-                    </div>
-
-                    <button
-                        type="submit"
-                        disabled={isSubmitting}
-                        className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white font-medium py-2.5 rounded-lg transition"
-                    >
-                        {isSubmitting ? "Signing in..." : "Sign in"}
-                    </button>
-                </form>
-
-                <p className="text-center text-sm text-slate-500 mt-6">
-                    Don't have an account?{" "}
-                    <Link to={"/register"} className="text-indigo-600 hover:text-indigo-700 font-medium">
-                        Sign up
-                    </Link>
+                {/* Footer note */}
+                <p className="text-center text-xs text-[#565C66] mt-6">
+                    Secured with end-to-end encryption
                 </p>
             </div>
         </div>

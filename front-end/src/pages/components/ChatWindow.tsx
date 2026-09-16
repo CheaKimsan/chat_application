@@ -24,9 +24,6 @@ type CallRecord = {
     direction?: "incoming" | "outgoing";
 };
 
-// Minimal shape of what Layout.tsx passes down as `selectedConversation`
-// (its full `Conversation` type) — members are needed here to resolve
-// each message's sender to an avatar/name in group chats.
 type SelectedConversation = {
     id: string;
     isGroup: boolean;
@@ -47,8 +44,6 @@ const parseTimestamp = (value: string | number | Date) => {
     return parsed;
 };
 
-// Pulls HH:MM straight out of an ISO timestamp string, with no timezone
-// conversion at all — e.g. "2026-09-09T11:27:15.411083Z" -> "11:27".
 const extractTimeOnly = (value: string) => {
     const match = value.match(/T(\d{2}):(\d{2})/);
     return match ? `${match[1]}:${match[2]}` : "";
@@ -65,30 +60,9 @@ type SenderInfo = { username: string; profile_photo?: string };
 
 function SenderAvatar({ sender }: { sender: SenderInfo }) {
     return (
-        <div
-            title={sender.username}
-            style={{
-                width: 28,
-                height: 28,
-                flexShrink: 0,
-                borderRadius: "50%",
-                background: "#20242A",
-                border: "1px solid #23262A",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                overflow: "hidden",
-                color: "#8B92A0",
-                fontSize: 11,
-                fontWeight: 700,
-            }}
-        >
+        <div className="sender-avatar" title={sender.username}>
             {sender.profile_photo ? (
-                <img
-                    src={sender.profile_photo}
-                    alt=""
-                    style={{ width: "100%", height: "100%", objectFit: "cover" }}
-                />
+                <img src={sender.profile_photo} alt="" />
             ) : (
                 initialsOf(sender.username)
             )}
@@ -114,17 +88,11 @@ export default function ChatWindow() {
     const [openMessageMenuId, setOpenMessageMenuId] = useState<string | null>(null);
     const bottomRef = useRef<HTMLDivElement | null>(null);
 
-    // Groups are addressed by conversation_id; 1:1 chats are addressed by
-    // the other user's id. Exactly one of these is set at a time (Layout
-    // clears selectedContact when a group is selected, and vice versa).
     const conversationId = selectedConversation?.id;
     const contactId = selectedContact?.id;
     const activeId = conversationId ?? (contactId !== undefined ? String(contactId) : undefined);
     const isGroup = !!conversationId;
 
-    // Resolve a from_user id to {username, profile_photo} so each message
-    // bubble can show who actually sent it — needed for group chats where
-    // "not self" could be any of several members.
     const getSenderInfo = (fromUserId: string): SenderInfo => {
         if (isGroup) {
             const member = selectedConversation!.members.find((m) => String(m.id) === String(fromUserId));
@@ -133,7 +101,6 @@ export default function ChatWindow() {
         return { username: selectedContact?.username ?? "Unknown", profile_photo: selectedContact?.profile_photo };
     };
 
-    // Matches the keys Layout.tsx's sendMutation.onSuccess already invalidates.
     const messagesQueryKey = conversationId
         ? ["messages", "conv", conversationId]
         : ["messages", contactId];
@@ -169,7 +136,6 @@ export default function ChatWindow() {
         window.addEventListener("chat:call_history", handleHistory);
         return () => window.removeEventListener("chat:call_history", handleHistory);
     }, [selectedContact?.id]);
-
 
     const {
         data: messages = [],
@@ -268,18 +234,25 @@ export default function ChatWindow() {
             const attachment = (event as CustomEvent<any>).detail;
             if (!attachment?.message_id) return;
 
-            queryClient.setQueryData<MessageResponse[]>(messagesQueryKey, (prev = []) =>
-                prev.map((m) =>
+            queryClient.setQueryData<MessageResponse[]>(messagesQueryKey, (prev = []) => {
+                const matched = prev.some((m) => String(m.id) === String(attachment.message_id));
+                if (!matched) {
+                    // message not in cache yet (id race, or message not loaded) — refetch instead of dropping it
+                    queryClient.invalidateQueries({ queryKey: messagesQueryKey });
+                    return prev;
+                }
+                return prev.map((m) =>
                     String(m.id) === String(attachment.message_id)
                         ? { ...m, attachments: [...(m.attachments ?? []), attachment] }
                         : m
-                )
-            );
+                );
+            });
         };
 
         window.addEventListener("chat:new_attachment", handleIncomingAttachment);
         return () => window.removeEventListener("chat:new_attachment", handleIncomingAttachment);
     }, [queryClient, activeId, conversationId, contactId]);
+
 
     useEffect(() => {
         if (!contactId) return;
@@ -327,8 +300,8 @@ export default function ChatWindow() {
         return () => window.removeEventListener("chat:message_read", handleMessageRead);
     }, [queryClient, contactId]);
 
-    if (isLoading) return <div>Loading messages…</div>;
-    if (error) return <div>Failed to load messages</div>;
+    if (isLoading) return <div className="chat-window__state">Loading messages…</div>;
+    if (error) return <div className="chat-window__state chat-window__state--error">Failed to load messages</div>;
 
     const orderedMessages = [...messages].sort(
         (a, b) => parseTimestamp(a.created_at) - parseTimestamp(b.created_at)
@@ -345,6 +318,7 @@ export default function ChatWindow() {
             record,
         })),
     ].sort((a, b) => a.timestamp - b.timestamp);
+
     const today = new Date();
     const todayKey = today.toDateString();
     const yesterday = new Date(today);
@@ -361,19 +335,12 @@ export default function ChatWindow() {
         return date.toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" });
     };
 
-    // index of the last message I sent — only that one gets a "Delivered/Read" label
     const lastSelfIndex = [...orderedMessages].reverse().findIndex((m) => String(m.from_user) === String(user?.id));
     const lastSelfMessageId =
         lastSelfIndex === -1 ? null : orderedMessages[orderedMessages.length - 1 - lastSelfIndex].id;
 
     return (
-        <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 8 }}>
-            <style>{`
-                @keyframes spin {
-                    0% { transform: rotate(0deg); }
-                    100% { transform: rotate(360deg); }
-                }
-            `}</style>
+        <div className="chat-window">
             {timeline.map((item, index) => {
                 const currentDate = new Date(item.timestamp).toDateString();
                 const previousDate = index > 0 ? new Date(timeline[index - 1].timestamp).toDateString() : null;
@@ -382,12 +349,32 @@ export default function ChatWindow() {
                 if (item.kind === "call") {
                     const record = item.record;
                     const isIncoming = record.direction === "incoming";
-                    const title = record.status === "missed" || (record.status === "failed" && isIncoming) ? "Missed call" : record.status === "incoming" ? "Incoming call" : record.status === "rejected" ? "Rejected call" : record.status === "busy" ? "Busy call" : record.status === "failed" ? "Failed call" : isIncoming ? "Incoming call" : "Outgoing call";
+                    const title =
+                        record.status === "missed" || (record.status === "failed" && isIncoming)
+                            ? "Missed call"
+                            : record.status === "incoming"
+                                ? "Incoming call"
+                                : record.status === "rejected"
+                                    ? "Rejected call"
+                                    : record.status === "busy"
+                                        ? "Busy call"
+                                        : record.status === "failed"
+                                            ? "Failed call"
+                                            : isIncoming
+                                                ? "Incoming call"
+                                                : "Outgoing call";
                     const CallIcon = record.mode === "video" ? Video : Phone;
+
                     return (
                         <Fragment key={`call-${record.id}`}>
-                            {showDateDivider && <div className="chat-date-divider"><span>{formatDateLabel(item.timestamp)}</span></div>}
-                            <div className={`call-history-card call-history-card--${record.status} call-history-card--${isIncoming ? "incoming" : "outgoing"}`}>
+                            {showDateDivider && (
+                                <div className="chat-date-divider">
+                                    <span>{formatDateLabel(item.timestamp)}</span>
+                                </div>
+                            )}
+                            <div
+                                className={`call-history-card call-history-card--${record.status} call-history-card--${isIncoming ? "incoming" : "outgoing"}`}
+                            >
                                 <div className="call-history-card__copy">
                                     <strong>{title}</strong>
                                     <span>
@@ -406,113 +393,114 @@ export default function ChatWindow() {
                 const showReceipt = isSelf && m.id === lastSelfMessageId;
                 const attachments = m.attachments ?? [];
                 const isEditing = editingMessageId === m.id;
-                // Editing goes through the encrypted 1:1 edit flow (reqEditMessage
-                // needs a contactId to resolve the shared key), so it's only
-                // offered for 1:1 messages — group messages are plaintext and
-                // don't have a matching group-edit endpoint yet.
                 const canEdit = isSelf && !conversationId;
 
-                // Whether consecutive messages come from the same sender —
-                // groups the avatar/name once per run instead of every bubble.
                 const previousItem = index > 0 ? timeline[index - 1] : null;
                 const previousFromSameSender =
-                    previousItem?.kind === "message" && String(previousItem.message.from_user) === String(m.from_user);
+                    previousItem?.kind === "message" &&
+                    String(previousItem.message.from_user) === String(m.from_user);
                 const showSenderHeader = !isSelf && !showDateDivider && !previousFromSameSender;
                 const showAvatarSlot = !isSelf;
                 const sender = !isSelf ? getSenderInfo(m.from_user) : null;
+                const isPending = m.body === "[pending — waiting for secure connection]";
 
                 return (
                     <Fragment key={m.id}>
-                        {showDateDivider && <div className="chat-date-divider"><span>{formatDateLabel(item.timestamp)}</span></div>}
+                        {showDateDivider && (
+                            <div className="chat-date-divider">
+                                <span>{formatDateLabel(item.timestamp)}</span>
+                            </div>
+                        )}
                         <div
-                            className={`message-entry ${isSelf ? "message-entry--self" : ""}`}
+                            className={`message-entry${isSelf ? " message-entry--self" : ""}`}
                             onClick={(event) => {
                                 if (!isSelf || isEditing) return;
                                 const target = event.target as HTMLElement;
                                 if (target.closest("button, input, form, audio, video, img")) return;
                                 setOpenMessageMenuId(openMessageMenuId === m.id ? null : m.id);
                             }}
-                            style={{
-                                display: "flex",
-                                flexDirection: "row",
-                                justifyContent: isSelf ? "flex-end" : "flex-start",
-                                alignItems: "flex-end",
-                                gap: 8,
-                            }}
                         >
                             {showAvatarSlot && (
-                                <div style={{ width: 28, flexShrink: 0 }}>
+                                <div className="message-entry__avatar-slot">
                                     {showSenderHeader && sender && <SenderAvatar sender={sender} />}
                                 </div>
                             )}
 
-                            <div
-                                style={{
-                                    display: "flex",
-                                    flexDirection: "column",
-                                    alignItems: isSelf ? "flex-end" : "flex-start",
-                                    gap: 4,
-                                    maxWidth: "70%",
-                                }}
-                            >
-                                {/* Sender name — only shown in group chats, only on the first bubble of a run. */}
+                            <div className="message-entry__body">
                                 {showSenderHeader && isGroup && sender && (
-                                    <span style={{ fontSize: 11, fontWeight: 600, color: "#8B92A0", marginLeft: 2 }}>
-                                        {sender.username}
-                                    </span>
+                                    <span className="message-entry__sender-name">{sender.username}</span>
                                 )}
 
                                 {attachments.length > 0 && (
-                                    <div
-                                        style={{
-                                            display: "flex",
-                                            flexDirection: "column",
-                                            gap: 8,
-                                        }}
-                                    >
+                                    <div className="message-attachments">
                                         {attachments.map((attachment) => {
-                                            const isImage = attachment.type === "image" || attachment.mime_type?.startsWith("image/");
-                                            const isVideo = attachment.type === "video" || attachment.mime_type?.startsWith("video/");
-                                            const isAudio = attachment.type === "audio" || attachment.mime_type?.startsWith("audio/");
+                                            const url = attachment.url || "";
+                                            const mime = attachment.mime_type || "";
+                                            const type = attachment.type || "";
+
+                                            // Detect by MIME, then by type, then by file extension.
+                                            // .webm is ambiguous — treat it as AUDIO when the backend
+                                            // labeled it audio/voice, otherwise use MIME prefix.
+                                            const hasWebmExt = /\.webm(\?|$)/i.test(url);
+
+                                            const isImage =
+                                                type === "image" ||
+                                                mime.startsWith("image/") ||
+                                                /\.(png|jpe?g|gif|webp|avif|bmp|svg)(\?|$)/i.test(url);
+
+                                            const isAudio =
+                                                type === "audio" ||
+                                                type === "voice" ||
+                                                mime.startsWith("audio/") ||
+                                                /\.(mp3|wav|ogg|m4a|aac|opus)(\?|$)/i.test(url) ||
+                                                (hasWebmExt && (type === "audio" || type === "voice" || mime === "audio/webm"));
+
+                                            const isVideo =
+                                                !isAudio && (
+                                                    type === "video" ||
+                                                    mime.startsWith("video/") ||
+                                                    /\.(mp4|mov|avi|mkv|m4v)(\?|$)/i.test(url) ||
+                                                    hasWebmExt
+                                                );
 
                                             return isImage ? (
                                                 <img
                                                     key={attachment.id}
                                                     src={attachment.url}
                                                     alt="uploaded image"
-                                                    style={{
-                                                        maxWidth: 260,
-                                                        maxHeight: 260,
-                                                        borderRadius: 12,
-                                                        border: "1px solid rgba(255,255,255,0.1)",
-                                                        objectFit: "cover",
-                                                    }}
+                                                    className="message-attachment message-attachment--image"
                                                 />
                                             ) : isAudio ? (
                                                 <audio
                                                     key={attachment.id}
                                                     controls
-                                                    style={{ maxWidth: 320 }}
+                                                    preload="metadata"
+                                                    className="message-attachment message-attachment--audio"
                                                 >
-                                                    <source src={attachment.url} type={attachment.mime_type} />
+                                                    <source src={attachment.url} type={attachment.mime_type || "audio/webm"} />
                                                     Your browser does not support the audio tag.
                                                 </audio>
                                             ) : isVideo ? (
                                                 <video
                                                     key={attachment.id}
                                                     controls
-                                                    style={{
-                                                        maxWidth: 320,
-                                                        maxHeight: 320,
-                                                        borderRadius: 12,
-                                                        border: "1px solid rgba(255,255,255,0.1)",
-                                                        objectFit: "cover",
-                                                    }}
+                                                    preload="metadata"
+                                                    className="message-attachment message-attachment--video"
                                                 >
-                                                    <source src={attachment.url} type={attachment.mime_type} />
+                                                    <source src={attachment.url} type={attachment.mime_type || "video/webm"} />
                                                     Your browser does not support the video tag.
                                                 </video>
-                                            ) : null;
+                                            ) : (
+                                                <a
+                                                    key={attachment.id}
+                                                    href={attachment.url}
+                                                    target="_blank"
+                                                    rel="noreferrer"
+                                                    className="message-attachment message-attachment--file"
+                                                >
+                                                    📎 {attachment.filename || "Download file"}
+                                                </a>
+                                            );
                                         })}
                                     </div>
                                 )}
@@ -523,9 +511,17 @@ export default function ChatWindow() {
                                             event.preventDefault();
                                             const text = editingText.trim();
                                             if (!text || !contactId) return;
-                                            const updated = await reqEditMessage({ messageId: m.id, body: text, contactId: String(contactId) });
-                                            queryClient.setQueryData<MessageResponse[]>(messagesQueryKey, (prev = []) =>
-                                                prev.map((message) => message.id === m.id ? { ...message, ...updated } : message)
+                                            const updated = await reqEditMessage({
+                                                messageId: m.id,
+                                                body: text,
+                                                contactId: String(contactId),
+                                            });
+                                            queryClient.setQueryData<MessageResponse[]>(
+                                                messagesQueryKey,
+                                                (prev = []) =>
+                                                    prev.map((message) =>
+                                                        message.id === m.id ? { ...message, ...updated } : message
+                                                    )
                                             );
                                             setEditingMessageId(null);
                                         }}
@@ -538,67 +534,71 @@ export default function ChatWindow() {
                                             autoFocus
                                             aria-label="Edit message"
                                         />
-                                        <button className="message-edit-save" type="submit" disabled={!editingText.trim()}>Save</button>
-                                        <button className="message-edit-cancel" type="button" onClick={() => setEditingMessageId(null)}>Cancel</button>
+                                        <button className="message-edit-save" type="submit" disabled={!editingText.trim()}>
+                                            Save
+                                        </button>
+                                        <button
+                                            className="message-edit-cancel"
+                                            type="button"
+                                            onClick={() => setEditingMessageId(null)}
+                                        >
+                                            Cancel
+                                        </button>
                                     </form>
-                                ) : m.body && (
-                                    m.body === "[pending — waiting for secure connection]" ? (
-                                        <div
-                                            style={{
-                                                display: "flex",
-                                                alignItems: "center",
-                                                gap: 6,
-                                                padding: "8px 12px",
-                                                borderRadius: 12,
-                                                backgroundColor: isSelf ? "#2563eb" : "#3f3f46",
-                                                opacity: 0.6,
-                                            }}
-                                        >
-                                            <div style={{
-                                                width: 12,
-                                                height: 12,
-                                                border: "2px solid rgba(255,255,255,0.3)",
-                                                borderTop: "2px solid #fff",
-                                                borderRadius: "50%",
-                                                animation: "spin 0.8s linear infinite",
-                                                flexShrink: 0,
-                                            }} />
-                                            <span className="text-white" style={{ fontSize: 13, fontStyle: "italic" }}>
-                                                Waiting to decrypt…
-                                            </span>
-                                        </div>
-                                    ) : (
-                                        <div
-                                            className="text-white message-bubble"
-                                            style={{
-                                                padding: "8px 12px",
-                                                borderRadius: 12,
-                                                backgroundColor: isSelf ? "#2563eb" : "#3f3f46",
-                                            }}
-                                        >
-                                            {m.body}
-                                        </div>
+                                ) : (
+                                    m.body && (
+                                        isPending ? (
+                                            <div className="message-bubble message-bubble--self message-bubble--pending">
+                                                <div className="message-bubble__spinner" />
+                                                <span>Waiting to decrypt…</span>
+                                            </div>
+                                        ) : (
+                                            <div
+                                                className={`message-bubble ${isSelf
+                                                    ? "message-bubble--self"
+                                                    : "message-bubble--other"
+                                                    }`}
+                                            >
+                                                {m.body}
+                                            </div>
+                                        )
                                     )
                                 )}
 
-                                <span style={{ fontSize: 11, color: "#8B92A0", marginTop: 2 }}>
-                                    {extractTimeOnly(m.created_at)}{showReceipt ? ` · ${m.read_at ? "Read" : "Delivered"}` : ""}
+                                <span className="message-time">
+                                    {extractTimeOnly(m.created_at)}
+                                    {showReceipt ? ` · ${m.read_at ? "Read" : "Delivered"}` : ""}
                                 </span>
+
                                 {isSelf && !isEditing && openMessageMenuId === m.id && (
                                     <div className="message-actions">
                                         <div className="message-actions-menu">
                                             {canEdit && m.body && (
-                                                <button type="button" onClick={() => { setEditingMessageId(m.id); setEditingText(m.body); setOpenMessageMenuId(null); }}>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => {
+                                                        setEditingMessageId(m.id);
+                                                        setEditingText(m.body);
+                                                        setOpenMessageMenuId(null);
+                                                    }}
+                                                >
                                                     <Pencil size={14} />
                                                     Edit
                                                 </button>
                                             )}
-                                            <button type="button" className="message-actions-menu__delete" onClick={async () => {
-                                                setOpenMessageMenuId(null);
-                                                if (!window.confirm("Delete this message?")) return;
-                                                await reqDeleteMessage(m.id);
-                                                queryClient.setQueryData<MessageResponse[]>(messagesQueryKey, (prev = []) => prev.filter((message) => message.id !== m.id));
-                                            }}>
+                                            <button
+                                                type="button"
+                                                className="message-actions-menu__delete"
+                                                onClick={async () => {
+                                                    setOpenMessageMenuId(null);
+                                                    if (!window.confirm("Delete this message?")) return;
+                                                    await reqDeleteMessage(m.id);
+                                                    queryClient.setQueryData<MessageResponse[]>(
+                                                        messagesQueryKey,
+                                                        (prev = []) => prev.filter((message) => message.id !== m.id)
+                                                    );
+                                                }}
+                                            >
                                                 <Trash2 size={14} />
                                                 Delete
                                             </button>
@@ -611,7 +611,13 @@ export default function ChatWindow() {
                 );
             })}
 
-            {isUploading && <LoadingSpinner progress={uploadProgress} loaded={uploadedBytes} total={uploadTotalBytes} />}
+            {isUploading && (
+                <LoadingSpinner
+                    progress={uploadProgress}
+                    loaded={uploadedBytes}
+                    total={uploadTotalBytes}
+                />
+            )}
             <div ref={bottomRef} />
         </div>
     );

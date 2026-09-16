@@ -1,12 +1,4 @@
 import { ChevronLeft } from 'lucide-react';
-import { useAuthStore } from "../../store/auth.store";
-
-const COLORS = {
-    border: '#2A2F37',
-    dim: '#8B92A0',
-    teal: '#4FA9A0',
-    faint: '#565C66',
-};
 
 export interface Contact {
     name: string;
@@ -18,69 +10,23 @@ export interface Contact {
 
 function InitialsAvatar({ initials, online, profilePhoto }: { initials: string; online: boolean; profilePhoto?: string }) {
     return (
-        <div style={{ position: 'relative', width: 40, height: 40, flexShrink: 0 }}>
-            <div
-                style={{
-                    width: 40,
-                    height: 40,
-                    borderRadius: 10,
-                    background: '#20242A',
-                    border: `1px solid ${COLORS.border}`,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    fontFamily: "'Space Grotesk', sans-serif",
-                    fontSize: 13,
-                    fontWeight: 600,
-                    color: COLORS.dim,
-                    letterSpacing: 0.5,
-                }}
-            >
+        <div className="chat-header__avatar-wrap">
+            <div className="chat-header__avatar">
                 {profilePhoto ? (
-                    <img
-                        src={profilePhoto}
-                        alt=""
-                        style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                    />
+                    <img src={profilePhoto} alt="" />
                 ) : (
                     initials
                 )}
             </div>
-
-            {online && (
-                <span
-                    style={{
-                        position: 'absolute',
-                        bottom: -2,
-                        right: -2,
-                        width: 10,
-                        height: 10,
-                        borderRadius: '50%',
-                        background: COLORS.teal,
-                        border: '2px solid #1B1F24',
-                    }}
-                />
-            )}
+            {online && <span className="chat-header__status-dot" aria-label="Online" />}
         </div>
     );
 }
 
 function TypingDots() {
     return (
-        <span style={{ display: 'inline-flex', gap: 2 }}>
-            {[0, 1, 2].map((i) => (
-                <span
-                    key={i}
-                    style={{
-                        width: 4,
-                        height: 4,
-                        borderRadius: '50%',
-                        background: COLORS.teal,
-                        animation: 'typingBounce 1s infinite',
-                        animationDelay: `${i * 0.15}s`,
-                    }}
-                />
-            ))}
+        <span className="typing-dots" aria-hidden="true">
+            <span /><span /><span />
         </span>
     );
 }
@@ -94,8 +40,6 @@ export default function ChatHeader({
     onBack?: () => void;
     isTyping?: boolean;
 }) {
-    const user = useAuthStore((s) => s.user);
-
     const display =
         contact ??
         {
@@ -106,29 +50,10 @@ export default function ChatHeader({
         };
 
     return (
-        <div
-            className="chat-header"
-            style={{
-                fontFamily: "'Inter', sans-serif",
-                display: 'flex',
-                alignItems: 'center',
-                gap: 12,
-                padding: '14px 128px 14px 20px',
-                borderBottom: `1px solid ${COLORS.border}`,
-                background: '#14171B',
-                color: '#E7E3DA',
-            }}
-        >
-            <style>{`
-                @keyframes freqPulse{0%,100%{transform:scaleY(0.5);}50%{transform:scaleY(1.3);}}
-                @keyframes typingBounce{0%,60%,100%{transform:translateY(0);opacity:0.4;}30%{transform:translateY(-3px);opacity:1;}}
-                @media (max-width:640px){.back-btn{display:inline-flex!important;}}
-            `}</style>
-
+        <header className="chat-header">
             <button
                 onClick={onBack}
-                className="back-btn"
-                style={{ display: 'none', background: 'none', border: 'none', color: COLORS.dim, cursor: 'pointer', padding: 4 }}
+                className="chat-header__back"
                 aria-label="Back"
             >
                 <ChevronLeft size={18} />
@@ -140,19 +65,25 @@ export default function ChatHeader({
                 profilePhoto={display?.profilePhoto}
             />
 
-            <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 14.5, fontWeight: 600, fontFamily: "'Space Grotesk', sans-serif" }}>
+            <div className="chat-header__info">
+                <div className="chat-header__name">
                     {display?.name || 'Unknown'}
                 </div>
-                <div style={{ fontSize: 11.5, color: COLORS.dim, display: 'flex', alignItems: 'center', gap: 6 }}>
+                <div className="chat-header__sub">
                     {isTyping ? (
-                        <span style={{ color: COLORS.teal, display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <span className="chat-header__typing">
                             <TypingDots />
                             typing…
                         </span>
-                    ) : null}
+                    ) : (
+                        <span
+                            className={`chat-header__status${display?.online ? ' chat-header__status--online' : ''}`}
+                        >
+                            {display?.online ? 'Online' : 'Offline'}
+                        </span>
+                    )}
                 </div>
             </div>
-        </div>
+        </header>
     );
 }

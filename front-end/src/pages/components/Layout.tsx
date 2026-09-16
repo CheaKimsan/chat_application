@@ -83,6 +83,9 @@ export default function Layout() {
         }),
     }));
 
+
+    const onlineUsers = usePresenceUsers();
+
     const contact = selectedGroup
         ? {
             name: selectedGroup.name ?? 'Group',
@@ -95,7 +98,7 @@ export default function Layout() {
             ? {
                 name: selectedContact.username,
                 freq: '104.2',
-                online: true,
+                online: onlineUsers.has(String(selectedContact.id)),
                 profilePhoto: selectedContact.profile_photo,
                 initials: (selectedContact.username)
                     .split(' ')
@@ -166,6 +169,41 @@ export default function Layout() {
         queryClient.clear();
         navigate('/');
     };
+
+
+    function usePresenceUsers() {
+        const [onlineUsers, setOnlineUsers] = useState<Set<string>>(new Set());
+
+        useEffect(() => {
+            const handlePresence = (e: Event) => {
+                const detail = (e as CustomEvent<{ user_id?: string | number; status?: string }>).detail;
+                if (!detail?.user_id) return;
+                setOnlineUsers((prev) => {
+                    const next = new Set(prev);
+                    if (detail.status === "online") next.add(String(detail.user_id));
+                    else next.delete(String(detail.user_id));
+                    return next;
+                });
+            };
+
+            const handleSnapshot = (e: Event) => {
+                const detail = (e as CustomEvent<{ users?: Array<string | number> }>).detail;
+                if (!detail?.users) return;
+                setOnlineUsers(new Set(detail.users.map(String)));
+            };
+
+            window.addEventListener("chat:presence", handlePresence);
+            window.addEventListener("chat:presence_snapshot", handleSnapshot);
+            return () => {
+                window.removeEventListener("chat:presence", handlePresence);
+                window.removeEventListener("chat:presence_snapshot", handleSnapshot);
+            };
+        }, []);
+
+        return onlineUsers;
+    }
+
+
 
 
     const typingTimeout = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);

@@ -21,28 +21,35 @@ func (r *MessageRepository) GetConversation(ctx context.Context, callerID, other
 	rows, err := r.db.QueryContext(
 		ctx,
 		`SELECT
-		m.id, m.from_user, m.to_user, m.body, m.nonce, m.created_at, m.read_at,
-		COALESCE(
-			json_agg(
-				json_build_object(
-					'id', a.id,
-					'message_id', a.message_id::text,
-					'type', a.type,
-					'url', a.url,
-					'filename', a.filename,
-					'mime_type', a.mime_type,
-					'size_bytes', a.size_bytes,
-					'created_at', a.created_at
-				) ORDER BY a.created_at
-			) FILTER (WHERE a.id IS NOT NULL),
-			'[]'
-		) AS attachments
-	FROM messages m
-	LEFT JOIN attachments a ON a.message_id = m.id
-	WHERE (m.from_user = $1 AND m.to_user = $2)
+			m.id, m.from_user, m.to_user, m.conversation_id, m.body, m.nonce, m.created_at, m.read_at,
+			COALESCE(
+				json_agg(
+					json_build_object(
+						'id', a.id,
+						'message_id', a.message_id::text,
+						'type', a.type,
+						'url', a.url,
+						'filename', a.filename,
+						'mime_type', a.mime_type,
+						'size_bytes', a.size_bytes,
+						'created_at', a.created_at
+					) ORDER BY a.created_at
+				) FILTER (WHERE a.id IS NOT NULL),
+				'[]'
+			) AS attachments
+		FROM messages m
+		LEFT JOIN attachments a ON a.message_id = m.id
+		WHERE m.conversation_id IN (
+			SELECT cm1.conversation_id
+			FROM conversation_members cm1
+			JOIN conversation_members cm2 ON cm2.conversation_id = cm1.conversation_id
+			JOIN conversations c ON c.id = cm1.conversation_id
+			WHERE cm1.user_id = $1 AND cm2.user_id = $2 AND c.is_group = false
+		)
+		OR (m.from_user = $1 AND m.to_user = $2)
 		OR (m.from_user = $2 AND m.to_user = $1)
-	GROUP BY m.id
-	ORDER BY m.created_at ASC`,
+		GROUP BY m.id
+		ORDER BY m.created_at ASC`,
 		callerID,
 		otherID,
 	)
@@ -54,13 +61,21 @@ func (r *MessageRepository) GetConversation(ctx context.Context, callerID, other
 	var messages []models.MessageResponse
 	for rows.Next() {
 		var m models.MessageResponse
+		var conversationID sql.NullString
+		var toUser sql.NullString
 		var attachmentsRaw []byte
 
 		if err := rows.Scan(
-			&m.ID, &m.FromUser, &m.ToUser, &m.Body, &m.Nonce, &m.CreatedAt, &m.ReadAt,
+			&m.ID, &m.FromUser, &toUser, &conversationID, &m.Body, &m.Nonce, &m.CreatedAt, &m.ReadAt,
 			&attachmentsRaw,
 		); err != nil {
 			return nil, err
+		}
+		if toUser.Valid {
+			m.ToUser = toUser.String
+		}
+		if conversationID.Valid {
+			m.ConversationID = conversationID.String
 		}
 		if err := json.Unmarshal(attachmentsRaw, &m.Attachments); err != nil {
 			log.Println("unmarshal error:", err, "raw:", string(attachmentsRaw))
@@ -90,14 +105,34 @@ func (r *MessageRepository) Create(ctx context.Context, fromUser, toUser string,
 
 func (r *MessageRepository) Update(ctx context.Context, messageID, fromUser string, ciphertext, nonce *string) (models.MessageResponse, string, error) {
 	var msg models.MessageResponse
+	var toUser sql.NullString
+	var conversationID sql.NullString
+
 	err := r.db.QueryRowContext(ctx,
 		`UPDATE messages
 			SET body = $1, nonce = $2
 			WHERE id = $3 AND from_user = $4
-			RETURNING id, from_user, to_user, body, nonce, created_at, read_at`,
+			RETURNING id, from_user, to_user, conversation_id, body, nonce, created_at, read_at`,
 		ciphertext, nonce, messageID, fromUser,
-	).Scan(&msg.ID, &msg.FromUser, &msg.ToUser, &msg.Body, &msg.Nonce, &msg.CreatedAt, &msg.ReadAt)
-	return msg, msg.ToUser, err
+	).Scan(&msg.ID, &msg.FromUser, &toUser, &conversationID, &msg.Body, &msg.Nonce, &msg.CreatedAt, &msg.ReadAt)
+	if err != nil {
+		return models.MessageResponse{}, "", err
+	}
+
+	if toUser.Valid {
+		msg.ToUser = toUser.String
+	}
+	if conversationID.Valid {
+		msg.ConversationID = conversationID.String
+	}
+
+	// Broadcast target: conversation_id for the new path, to_user for legacy.
+	broadcastTarget := msg.ConversationID
+	if broadcastTarget == "" {
+		broadcastTarget = msg.ToUser
+	}
+
+	return msg, broadcastTarget, nil
 }
 
 func (r *MessageRepository) Delete(ctx context.Context, messageID, fromUser string) (string, error) {
