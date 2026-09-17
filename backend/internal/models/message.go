@@ -26,6 +26,8 @@ type MessageResponse struct {
 	Body           *string         `json:"body,omitempty"`
 	Nonce          *string         `json:"nonce,omitempty"`
 	CreatedAt      time.Time       `json:"created_at"`
+	IsDeleted      bool            `json:"is_deleted"`
+	IsEdited       bool            `json:"is_edited"` // NEW
 	Attachments    []ws.Attachment `json:"attachments,omitempty"`
 	ReadAt         *time.Time      `json:"read_at"`
 }

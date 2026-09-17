@@ -54,6 +54,76 @@ const logTiming = (label: string, callId?: string | null) => {
     console.log(`[${new Date().toISOString()}] ${label}${suffix}`);
 };
 
+// --- Speaking / voice-activity detection -----------------------------
+// Cheap per-stream VAD built on the Web Audio API: an AnalyserNode reads
+// frequency-domain energy off the stream every animation frame, and we
+// flag "speaking" whenever the average level crosses a threshold. A short
+// hangover window keeps the indicator lit briefly after the last loud
+// frame so it doesn't flicker on/off between syllables or short pauses.
+type SpeakingDetector = {
+    ctx: AudioContext;
+    source: MediaStreamAudioSourceNode;
+    analyser: AnalyserNode;
+    raf: number;
+};
+
+const SPEAKING_THRESHOLD = 12; // tuned against typical mic noise floor vs. actual speech
+const SPEAKING_HANGOVER_MS = 400;
+
+function startSpeakingDetector(
+    stream: MediaStream,
+    setSpeaking: (speaking: boolean) => void,
+    ref: React.MutableRefObject<SpeakingDetector | null>
+) {
+    stopSpeakingDetector(ref, setSpeaking);
+
+    const hasAudio = stream.getAudioTracks().length > 0;
+    if (!hasAudio) return;
+
+    let ctx: AudioContext;
+    try {
+        ctx = new AudioContext();
+    } catch {
+        return; // AudioContext can be blocked pre-user-gesture in some browsers
+    }
+
+    const source = ctx.createMediaStreamSource(stream);
+    const analyser = ctx.createAnalyser();
+    analyser.fftSize = 512;
+    analyser.smoothingTimeConstant = 0.6;
+    source.connect(analyser);
+
+    const data = new Uint8Array(analyser.frequencyBinCount);
+    let lastSpokeAt = 0;
+
+    const tick = () => {
+        analyser.getByteFrequencyData(data);
+        let sum = 0;
+        for (let i = 0; i < data.length; i++) sum += data[i];
+        const level = sum / data.length;
+
+        const now = performance.now();
+        if (level > SPEAKING_THRESHOLD) lastSpokeAt = now;
+        setSpeaking(now - lastSpokeAt < SPEAKING_HANGOVER_MS);
+
+        const rafId = requestAnimationFrame(tick);
+        if (ref.current) ref.current.raf = rafId;
+    };
+
+    const rafId = requestAnimationFrame(tick);
+    ref.current = { ctx, source, analyser, raf: rafId };
+}
+
+function stopSpeakingDetector(ref: React.MutableRefObject<SpeakingDetector | null>, setSpeaking?: (speaking: boolean) => void) {
+    const current = ref.current;
+    if (!current) return;
+    cancelAnimationFrame(current.raf);
+    current.source.disconnect();
+    void current.ctx.close();
+    ref.current = null;
+    setSpeaking?.(false);
+}
+
 export default function CallPanel({ contactId }: CallPanelProps) {
     const [callState, setCallState] = useState<"idle" | "calling" | "incoming" | "connected">("idle");
     const [callMode, setCallMode] = useState<CallMode>("audio");
@@ -65,6 +135,8 @@ export default function CallPanel({ contactId }: CallPanelProps) {
     const [isFullscreen, setIsFullscreen] = useState(false);
     const [networkQuality, setNetworkQuality] = useState<"excellent" | "good" | "fair" | "poor">("good");
     const [statusMessage, setStatusMessage] = useState<string | null>(null);
+    const [isLocalSpeaking, setIsLocalSpeaking] = useState(false);
+    const [isRemoteSpeaking, setIsRemoteSpeaking] = useState(false);
     const callStateRef = useRef<"idle" | "calling" | "incoming" | "connected">("idle");
     const peerRef = useRef<RTCPeerConnection | null>(null);
     const localStreamRef = useRef<MediaStream | null>(null);
@@ -81,6 +153,8 @@ export default function CallPanel({ contactId }: CallPanelProps) {
     const ringtoneContextRef = useRef<AudioContext | null>(null);
     const callPanelRef = useRef<HTMLElement | null>(null);
     const historyFinishedRef = useRef(false);
+    const localSpeakingDetectorRef = useRef<SpeakingDetector | null>(null);
+    const remoteSpeakingDetectorRef = useRef<SpeakingDetector | null>(null);
     // Caches the in-flight/resolved getUserMedia() call so it's only ever
     // requested once per call, even if we pre-warm it on incoming-call UI
     // and then acceptCall() asks for it again — both share the same promise.
@@ -201,6 +275,8 @@ export default function CallPanel({ contactId }: CallPanelProps) {
 
     const clearCall = () => {
         stopRingtone();
+        stopSpeakingDetector(localSpeakingDetectorRef, setIsLocalSpeaking);
+        stopSpeakingDetector(remoteSpeakingDetectorRef, setIsRemoteSpeaking);
         localStreamRef.current?.getTracks().forEach((track) => track.stop());
         peerRef.current?.close();
         peerRef.current = null;
@@ -231,7 +307,6 @@ export default function CallPanel({ contactId }: CallPanelProps) {
         peer.oniceconnectionstatechange = () => {
             logTiming(`ICE state: ${peer.iceConnectionState}`, currentCallId);
         };
-
         // Fires on gathering progress — useful to see if candidate
         // gathering itself (rather than connectivity checks) is slow.
         peer.onicegatheringstatechange = () => {
@@ -257,6 +332,11 @@ export default function CallPanel({ contactId }: CallPanelProps) {
             }
             remoteStreamRef.current = existingStream ?? remoteStream;
             setRemoteStreamVersion((v) => v + 1); // triggers the effect above, once
+            // (Re)start remote VAD whenever the remote stream's audio track
+            // set changes — covers late-arriving audio tracks too.
+            if (event.track.kind === "audio") {
+                startSpeakingDetector(remoteStreamRef.current, setIsRemoteSpeaking, remoteSpeakingDetectorRef);
+            }
         };
         peer.onconnectionstatechange = () => {
             logTiming(`Connection state: ${peer.connectionState}`, currentCallId);
@@ -308,6 +388,7 @@ export default function CallPanel({ contactId }: CallPanelProps) {
             localStreamRef.current = stream;
             if (localVideoRef.current) localVideoRef.current.srcObject = stream;
             stream.getAudioTracks().forEach((track) => { track.enabled = true; });
+            startSpeakingDetector(stream, setIsLocalSpeaking, localSpeakingDetectorRef);
             return stream;
         })();
         localMediaRequestRef.current = { mode, promise };
@@ -615,16 +696,59 @@ export default function CallPanel({ contactId }: CallPanelProps) {
             ) : (
                 <div className="call-active-card">
                     <div className="call-video-stage">
-                        <video
-                            ref={(element) => {
-                                remoteVideoRef.current = element;
-                                if (element && remoteStreamRef.current) element.srcObject = remoteStreamRef.current;
-                            }}
-                            autoPlay
-                            playsInline
-                            className="call-remote-video"
-                        ></video>
-                        <video ref={(element) => { localVideoRef.current = element; if (element && localStreamRef.current) element.srcObject = localStreamRef.current; }} autoPlay muted playsInline className={`call-local-video${callMode === "audio" ? " call-local-video--audio" : ""}`} />
+                        <div className="call-video-stage">
+                            {/* 👇 ADD THIS — Audio-only pulsing avatar (only shows in audio calls) */}
+                            {callMode === "audio" && (
+                                <div className={`call-audio-avatar${isRemoteSpeaking ? " call-audio-avatar--speaking" : ""}`}>
+                                    <div className="call-audio-avatar__ring" />
+                                    <div className="call-audio-avatar__ring call-audio-avatar__ring--delay" />
+                                    <Phone size={28} />
+                                </div>
+                            )}
+
+                            <video
+                                ref={(element) => {
+                                    remoteVideoRef.current = element;
+                                    if (element && remoteStreamRef.current) element.srcObject = remoteStreamRef.current;
+                                }}
+                                autoPlay
+                                playsInline
+                                className={`call-remote-video${isRemoteSpeaking ? " call-remote-video--speaking" : ""}`}
+                            ></video>
+                            <video
+                                ref={(element) => { localVideoRef.current = element; if (element && localStreamRef.current) element.srcObject = localStreamRef.current; }}
+                                autoPlay
+                                muted
+                                playsInline
+                                className={`call-local-video${callMode === "audio" ? " call-local-video--audio" : ""}${isLocalSpeaking ? " call-local-video--speaking" : ""}`}
+                            />
+
+                            <div className="call-badge">{callState === "calling" ? "Calling" : "Connected"}</div>
+                            <div className="call-type-chip">{callMode === "video" ? "Video call" : "Audio call"}</div>
+                            <div className={`call-quality-badge call-quality-badge--${networkQuality}`}>
+                                {networkQuality.charAt(0).toUpperCase() + networkQuality.slice(1)}
+                            </div>
+
+                            {/* 👇 ADD THIS — Speaking badge (shows when either side is talking) */}
+                            {(isLocalSpeaking || isRemoteSpeaking) && (
+                                <div className={`call-speaking-badge call-speaking-badge--${isRemoteSpeaking ? "remote" : "local"}`}>
+                                    <span className="call-speaking-badge__bars">
+                                        <i /><i /><i />
+                                    </span>
+                                    {isRemoteSpeaking ? "Peer speaking" : "You're speaking"}
+                                </div>
+                            )}
+
+                            <button
+                                type="button"
+                                className="call-fullscreen-button"
+                                onClick={(event) => { event.stopPropagation(); toggleFullscreen(); }}
+                                title={isFullscreen ? "Exit fullscreen" : "Full screen"}
+                            >
+                                {isFullscreen ? <Minimize2 size={17} /> : <Maximize2 size={17} />}
+                            </button>
+                        </div>
+
                         <div className="call-badge">{callState === "calling" ? "Calling" : "Connected"}</div>
                         <div className="call-type-chip">{callMode === "video" ? "Video call" : "Audio call"}</div>
                         <div className={`call-quality-badge call-quality-badge--${networkQuality}`}>

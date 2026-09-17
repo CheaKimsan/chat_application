@@ -15,6 +15,11 @@ import {
 } from "../../components/message/core/request";
 import { ArrowDownLeft, ArrowUpRight, Pencil, Phone, Trash2, Video } from "lucide-react";
 
+// Local view-model extension. `deleted`/`edited` aren't (yet) part of the
+// shared MessageResponse type — add them there once the backend starts
+// persisting deleted_at / edited_at, and this alias can be dropped.
+type ChatMessage = MessageResponse & { deleted?: boolean; edited?: boolean };
+
 type CallRecord = {
     id: string;
     mode: "audio" | "video";
@@ -141,14 +146,26 @@ export default function ChatWindow() {
         data: messages = [],
         isLoading,
         error,
-    } = useQuery<MessageResponse[]>({
+    } = useQuery<ChatMessage[]>({
         queryKey: messagesQueryKey,
         queryFn: async () => {
+            let list: any[];
             if (conversationId) {
-                return await reqGetConversationMessages(conversationId);
+                list = await reqGetConversationMessages(conversationId);
+            } else {
+                const result = await reqGetMessages(contactId!);
+                list = Array.isArray(result) ? result : (result as any)?.messages ?? [];
             }
-            const result = await reqGetMessages(contactId!);
-            return Array.isArray(result) ? result : (result as any)?.messages ?? [];
+            // Server marks soft-deleted / edited rows with is_deleted /
+            // is_edited; map those onto the `deleted` / `edited` flags the
+            // renderer checks, same as the live socket paths do — so
+            // refreshing the page still shows the tombstone and the
+            // "Edited" label instead of losing that state.
+            return list.map((m) => ({
+                ...m,
+                ...(m.is_deleted ? { deleted: true, body: "", attachments: [] } : {}),
+                ...(m.is_edited ? { edited: true } : {}),
+            }));
         },
         enabled: !!conversationId || !!contactId,
     });
@@ -171,17 +188,26 @@ export default function ChatWindow() {
         if (!activeId) return;
 
         const handleUpdated = (event: Event) => {
-            const updated = (event as CustomEvent<MessageResponse & { plaintext?: string | null; decryptError?: string }>).detail;
-            queryClient.setQueryData<MessageResponse[]>(messagesQueryKey, (prev = []) =>
+            const updated = (event as CustomEvent<ChatMessage & { plaintext?: string | null; decryptError?: string }>).detail;
+            queryClient.setQueryData<ChatMessage[]>(messagesQueryKey, (prev = []) =>
                 prev.map((message) => String(message.id) === String(updated.id)
-                    ? { ...message, ...updated, body: updated.plaintext ?? (updated.decryptError ? "[unable to decrypt]" : updated.body ?? "") }
+                    ? {
+                        ...message,
+                        ...updated,
+                        body: updated.plaintext ?? (updated.decryptError ? "[unable to decrypt]" : updated.body ?? ""),
+                        edited: true,
+                    }
                     : message)
             );
         };
         const handleDeleted = (event: Event) => {
             const { message_id } = (event as CustomEvent<{ message_id: string }>).detail;
-            queryClient.setQueryData<MessageResponse[]>(messagesQueryKey, (prev = []) =>
-                prev.filter((message) => String(message.id) !== String(message_id))
+            queryClient.setQueryData<ChatMessage[]>(messagesQueryKey, (prev = []) =>
+                prev.map((message) =>
+                    String(message.id) === String(message_id)
+                        ? { ...message, body: "", attachments: [], deleted: true }
+                        : message
+                )
             );
         };
         window.addEventListener("chat:message_updated", handleUpdated);
@@ -200,7 +226,7 @@ export default function ChatWindow() {
         if (!activeId) return;
 
         const handleIncomingMessage = (event: Event) => {
-            const incoming = (event as CustomEvent<MessageResponse & { plaintext?: string | null; decryptError?: string }>).detail;
+            const incoming = (event as CustomEvent<ChatMessage & { plaintext?: string | null; decryptError?: string }>).detail;
             if (!incoming) return;
 
             const isRelevant = conversationId
@@ -209,12 +235,12 @@ export default function ChatWindow() {
 
             if (!isRelevant) return;
 
-            const normalized: MessageResponse = {
+            const normalized: ChatMessage = {
                 ...incoming,
                 body: incoming.plaintext ?? (incoming.decryptError ? "[unable to decrypt]" : incoming.body ?? ""),
             };
 
-            queryClient.setQueryData<MessageResponse[]>(messagesQueryKey, (prev = []) => {
+            queryClient.setQueryData<ChatMessage[]>(messagesQueryKey, (prev = []) => {
                 if (prev.some((m) => m.id === normalized.id)) return prev;
 
                 return [...prev, normalized].sort(
@@ -234,7 +260,7 @@ export default function ChatWindow() {
             const attachment = (event as CustomEvent<any>).detail;
             if (!attachment?.message_id) return;
 
-            queryClient.setQueryData<MessageResponse[]>(messagesQueryKey, (prev = []) => {
+            queryClient.setQueryData<ChatMessage[]>(messagesQueryKey, (prev = []) => {
                 const matched = prev.some((m) => String(m.id) === String(attachment.message_id));
                 if (!matched) {
                     // message not in cache yet (id race, or message not loaded) — refetch instead of dropping it
@@ -289,7 +315,7 @@ export default function ChatWindow() {
             const { from_user, read_at } = (event as CustomEvent<{ from_user: string; read_at: string }>).detail;
             if (String(from_user) !== String(contactId)) return;
 
-            queryClient.setQueryData<MessageResponse[]>(["messages", contactId], (prev = []) =>
+            queryClient.setQueryData<ChatMessage[]>(["messages", contactId], (prev = []) =>
                 prev.map((m) =>
                     String(m.to_user) === String(from_user) && !m.read_at ? { ...m, read_at } : m
                 )
@@ -300,8 +326,68 @@ export default function ChatWindow() {
         return () => window.removeEventListener("chat:message_read", handleMessageRead);
     }, [queryClient, contactId]);
 
-    if (isLoading) return <div className="chat-window__state">Loading messages…</div>;
-    if (error) return <div className="chat-window__state chat-window__state--error">Failed to load messages</div>;
+    if (isLoading) {
+        return (
+            <div className="chat-window chat-window--loading">
+                <div className="skeleton-thread">
+                    {/* Received message */}
+                    <div className="skeleton-msg skeleton-msg--left">
+                        <div className="skeleton-avatar" />
+                        <div className="skeleton-bubble" style={{ width: "42%" }} />
+                    </div>
+
+                    {/* Sent message */}
+                    <div className="skeleton-msg skeleton-msg--right">
+                        <div className="skeleton-bubble" style={{ width: "28%" }} />
+                    </div>
+
+                    {/* Received (2 lines) */}
+                    <div className="skeleton-msg skeleton-msg--left">
+                        <div className="skeleton-avatar" />
+                        <div className="skeleton-bubble skeleton-bubble--tall" style={{ width: "58%" }} />
+                    </div>
+
+                    {/* Sent */}
+                    <div className="skeleton-msg skeleton-msg--right">
+                        <div className="skeleton-bubble" style={{ width: "36%" }} />
+                    </div>
+
+                    {/* Received */}
+                    <div className="skeleton-msg skeleton-msg--left">
+                        <div className="skeleton-avatar" />
+                        <div className="skeleton-bubble" style={{ width: "48%" }} />
+                    </div>
+
+                    {/* Sent (short) */}
+                    <div className="skeleton-msg skeleton-msg--right">
+                        <div className="skeleton-bubble" style={{ width: "22%" }} />
+                    </div>
+                </div>
+
+                {/* Loading indicator at bottom */}
+                <div className="chat-window__loader">
+                    <span className="chat-window__loader-dot" />
+                    <span className="chat-window__loader-dot" />
+                    <span className="chat-window__loader-dot" />
+                    <span className="chat-window__loader-text">Loading messages…</span>
+                </div>
+            </div>
+        );
+    }
+
+    if (error) {
+        return (
+            <div className="chat-window chat-window--error">
+                <div className="chat-window__error-card">
+                    <div className="chat-window__error-icon">⚠</div>
+                    <h3 className="chat-window__error-title">Couldn't load messages</h3>
+                    <p className="chat-window__error-text">
+                        Something went wrong. Please check your connection and try again.
+                    </p>
+                </div>
+            </div>
+        );
+    }
 
     const orderedMessages = [...messages].sort(
         (a, b) => parseTimestamp(a.created_at) - parseTimestamp(b.created_at)
@@ -388,12 +474,12 @@ export default function ChatWindow() {
                     );
                 }
 
-                const m = item.message;
+                const m = item.message as ChatMessage;
                 const isSelf = String(m.from_user) === String(user?.id);
                 const showReceipt = isSelf && m.id === lastSelfMessageId;
                 const attachments = m.attachments ?? [];
                 const isEditing = editingMessageId === m.id;
-                const canEdit = isSelf && !conversationId;
+                const canEdit = isSelf && !conversationId && !m.deleted;
 
                 const previousItem = index > 0 ? timeline[index - 1] : null;
                 const previousFromSameSender =
@@ -414,7 +500,7 @@ export default function ChatWindow() {
                         <div
                             className={`message-entry${isSelf ? " message-entry--self" : ""}`}
                             onClick={(event) => {
-                                if (!isSelf || isEditing) return;
+                                if (!isSelf || isEditing || m.deleted) return;
                                 const target = event.target as HTMLElement;
                                 if (target.closest("button, input, form, audio, video, img")) return;
                                 setOpenMessageMenuId(openMessageMenuId === m.id ? null : m.id);
@@ -431,7 +517,7 @@ export default function ChatWindow() {
                                     <span className="message-entry__sender-name">{sender.username}</span>
                                 )}
 
-                                {attachments.length > 0 && (
+                                {attachments.length > 0 && !m.deleted && (
                                     <div className="message-attachments">
                                         {attachments.map((attachment) => {
                                             const url = attachment.url || "";
@@ -516,11 +602,13 @@ export default function ChatWindow() {
                                                 body: text,
                                                 contactId: String(contactId),
                                             });
-                                            queryClient.setQueryData<MessageResponse[]>(
+                                            queryClient.setQueryData<ChatMessage[]>(
                                                 messagesQueryKey,
                                                 (prev = []) =>
                                                     prev.map((message) =>
-                                                        message.id === m.id ? { ...message, ...updated } : message
+                                                        message.id === m.id
+                                                            ? { ...message, ...updated, edited: true }
+                                                            : message
                                                     )
                                             );
                                             setEditingMessageId(null);
@@ -545,6 +633,10 @@ export default function ChatWindow() {
                                             Cancel
                                         </button>
                                     </form>
+                                ) : m.deleted ? (
+                                    <div className="message-bubble message-bubble--deleted">
+                                        <em>This message was deleted</em>
+                                    </div>
                                 ) : (
                                     m.body && (
                                         isPending ? (
@@ -567,10 +659,11 @@ export default function ChatWindow() {
 
                                 <span className="message-time">
                                     {extractTimeOnly(m.created_at)}
+                                    {m.edited && !m.deleted ? " · Edited" : ""}
                                     {showReceipt ? ` · ${m.read_at ? "Read" : "Delivered"}` : ""}
                                 </span>
 
-                                {isSelf && !isEditing && openMessageMenuId === m.id && (
+                                {isSelf && !isEditing && !m.deleted && openMessageMenuId === m.id && (
                                     <div className="message-actions">
                                         <div className="message-actions-menu">
                                             {canEdit && m.body && (
@@ -593,9 +686,14 @@ export default function ChatWindow() {
                                                     setOpenMessageMenuId(null);
                                                     if (!window.confirm("Delete this message?")) return;
                                                     await reqDeleteMessage(m.id);
-                                                    queryClient.setQueryData<MessageResponse[]>(
+                                                    queryClient.setQueryData<ChatMessage[]>(
                                                         messagesQueryKey,
-                                                        (prev = []) => prev.filter((message) => message.id !== m.id)
+                                                        (prev = []) =>
+                                                            prev.map((message) =>
+                                                                message.id === m.id
+                                                                    ? { ...message, body: "", attachments: [], deleted: true }
+                                                                    : message
+                                                            )
                                                     );
                                                 }}
                                             >

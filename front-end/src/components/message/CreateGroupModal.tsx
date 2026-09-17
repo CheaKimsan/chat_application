@@ -2,22 +2,18 @@ import { useState } from "react";
 import { X, Users, Search, Check } from "lucide-react";
 import { UserResponse } from "../user/core/model";
 
-const C = {
-    bg: "#0F1113",
-    subBg: "#131518",
-    border: "#23262A",
-    text: "#DCE1E6",
-    muted: "#8B92A0",
-    accent: "#4FA9A0",
-    accentDim: "rgba(79, 169, 160, 0.12)",
-    danger: "#E27D7D",
-};
-
 interface CreateGroupModalProps {
     contacts: UserResponse[];
     onClose: () => void;
     onCreate: (name: string, memberIds: string[]) => Promise<void>;
 }
+
+const initialsOf = (name: string) =>
+    name
+        .split(" ")
+        .map((p) => p[0]?.toUpperCase())
+        .join("")
+        .slice(0, 2) || "?";
 
 export default function CreateGroupModal({ contacts, onClose, onCreate }: CreateGroupModalProps) {
     const [name, setName] = useState("");
@@ -59,228 +55,146 @@ export default function CreateGroupModal({ contacts, onClose, onCreate }: Create
     };
 
     return (
-        <div
-            onClick={onClose}
-            style={{
-                position: "fixed",
-                inset: 0,
-                background: "rgba(0, 0, 0, 0.55)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                zIndex: 1000,
-            }}
-        >
-            <div
-                onClick={(e) => e.stopPropagation()}
-                style={{
-                    width: 380,
-                    maxHeight: "80vh",
-                    display: "flex",
-                    flexDirection: "column",
-                    background: C.subBg,
-                    border: `1px solid ${C.border}`,
-                    borderRadius: 12,
-                    color: C.text,
-                    overflow: "hidden",
-                }}
-            >
+        <div className="modal-backdrop" onClick={onClose}>
+            <div className="modal" onClick={(e) => e.stopPropagation()}>
+
                 {/* Header */}
-                <div
-                    style={{
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "space-between",
-                        padding: "16px 16px 14px",
-                        borderBottom: `1px solid ${C.border}`,
-                    }}
-                >
-                    <div style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 700, fontSize: 15 }}>
-                        <Users size={18} color={C.accent} />
-                        New group
+                <div className="modal__header">
+                    <div className="modal__title">
+                        <span className="modal__title-icon">
+                            <Users size={16} />
+                        </span>
+                        <span>New group</span>
                     </div>
                     <button
+                        className="modal__close"
                         onClick={onClose}
-                        style={{
-                            width: 28,
-                            height: 28,
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            background: "transparent",
-                            border: "none",
-                            borderRadius: 6,
-                            color: C.muted,
-                            cursor: "pointer",
-                        }}
-                        onMouseEnter={(e) => (e.currentTarget.style.background = "#191c1f")}
-                        onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                        aria-label="Close"
                     >
                         <X size={16} />
                     </button>
                 </div>
 
-                {/* Group name input */}
-                <div style={{ padding: "14px 16px 10px" }}>
-                    <input
-                        value={name}
-                        onChange={(e) => setName(e.target.value)}
-                        placeholder="Group name"
-                        autoFocus
-                        style={{
-                            width: "100%",
-                            height: 38,
-                            padding: "0 12px",
-                            borderRadius: 8,
-                            background: C.bg,
-                            border: `1px solid ${C.border}`,
-                            color: C.text,
-                            fontSize: 13,
-                            outline: "none",
-                            boxSizing: "border-box",
-                        }}
-                    />
-                </div>
+                {/* Body */}
+                <div className="modal__body">
 
-                {/* Member search */}
-                <div style={{ padding: "0 16px 10px" }}>
-                    <label
-                        style={{
-                            height: 34,
-                            display: "flex",
-                            alignItems: "center",
-                            gap: 8,
-                            padding: "0 10px",
-                            borderRadius: 8,
-                            background: C.bg,
-                            border: `1px solid ${C.border}`,
-                            color: C.muted,
-                        }}
-                    >
-                        <Search size={14} />
+                    {/* Group name */}
+                    <div className="modal__field">
+                        <label className="modal__label" htmlFor="groupName">
+                            Group name
+                        </label>
                         <input
-                            value={search}
-                            onChange={(e) => setSearch(e.target.value)}
-                            placeholder="Search contacts"
-                            style={{
-                                width: "100%",
-                                border: "none",
-                                outline: "none",
-                                background: "transparent",
-                                color: C.text,
-                                fontSize: 12,
-                            }}
+                            id="groupName"
+                            className="modal__input"
+                            value={name}
+                            onChange={(e) => setName(e.target.value)}
+                            placeholder="e.g. Design team"
+                            autoFocus
                         />
-                    </label>
-                </div>
-
-                {/* Member list */}
-                <div style={{ flex: 1, overflowY: "auto", padding: "0 8px 8px", minHeight: 120 }}>
-                    {filteredContacts.length === 0 ? (
-                        <div style={{ padding: 16, fontSize: 13, color: C.muted, textAlign: "center" }}>
-                            No contacts found
-                        </div>
-                    ) : (
-                        filteredContacts.map((contact) => {
-                            const id = String(contact.id);
-                            const isChecked = selected.has(id);
-                            return (
-                                <button
-                                    key={id}
-                                    type="button"
-                                    onClick={() => toggleMember(id)}
-                                    style={{
-                                        width: "100%",
-                                        display: "flex",
-                                        alignItems: "center",
-                                        gap: 10,
-                                        padding: "8px 10px",
-                                        borderRadius: 8,
-                                        background: isChecked ? C.accentDim : "transparent",
-                                        border: "none",
-                                        textAlign: "left",
-                                        cursor: "pointer",
-                                        color: C.text,
-                                    }}
-                                    onMouseEnter={(e) => {
-                                        if (!isChecked) e.currentTarget.style.background = "#191c1f";
-                                    }}
-                                    onMouseLeave={(e) => {
-                                        if (!isChecked) e.currentTarget.style.background = "transparent";
-                                    }}
-                                >
-                                    <span
-                                        style={{
-                                            width: 32,
-                                            height: 32,
-                                            flexShrink: 0,
-                                            borderRadius: 9,
-                                            background: "#20242A",
-                                            border: `1px solid ${C.border}`,
-                                            display: "inline-flex",
-                                            alignItems: "center",
-                                            justifyContent: "center",
-                                            overflow: "hidden",
-                                            color: C.muted,
-                                            fontSize: 11,
-                                            fontWeight: 700,
-                                        }}
-                                    >
-                                        {contact.profile_photo ? (
-                                            <img src={contact.profile_photo} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                                        ) : (
-                                            contact.username.split(" ").map((p) => p[0]?.toUpperCase()).join("").slice(0, 2)
-                                        )}
-                                    </span>
-
-                                    <span style={{ flex: 1, minWidth: 0, fontSize: 13 }}>{contact.username}</span>
-
-                                    <span
-                                        style={{
-                                            width: 18,
-                                            height: 18,
-                                            flexShrink: 0,
-                                            borderRadius: 5,
-                                            border: `1px solid ${isChecked ? C.accent : C.border}`,
-                                            background: isChecked ? C.accent : "transparent",
-                                            display: "inline-flex",
-                                            alignItems: "center",
-                                            justifyContent: "center",
-                                        }}
-                                    >
-                                        {isChecked && <Check size={12} color={C.bg} />}
-                                    </span>
-                                </button>
-                            );
-                        })
-                    )}
-                </div>
-
-                {/* Error */}
-                {error && (
-                    <div style={{ padding: "0 16px 8px", fontSize: 12, color: C.danger }}>
-                        {error}
                     </div>
-                )}
+
+                    {/* Member search */}
+                    <div className="modal__field">
+                        <label className="modal__label" htmlFor="memberSearch">
+                            Members
+                            {selected.size > 0 && (
+                                <span className="modal__label-count">· {selected.size} selected</span>
+                            )}
+                        </label>
+                        <div className="modal__search">
+                            <Search size={14} />
+                            <input
+                                id="memberSearch"
+                                value={search}
+                                onChange={(e) => setSearch(e.target.value)}
+                                placeholder="Search contacts…"
+                            />
+                        </div>
+                    </div>
+
+                    {/* Selected chips */}
+                    {selected.size > 0 && (
+                        <div className="modal__chips">
+                            {Array.from(selected).map((id) => {
+                                const c = contacts.find((x) => String(x.id) === id);
+                                if (!c) return null;
+                                return (
+                                    <button
+                                        key={id}
+                                        type="button"
+                                        className="modal__chip"
+                                        onClick={() => toggleMember(id)}
+                                        title="Remove"
+                                    >
+                                        {c.profile_photo ? (
+                                            <img src={c.profile_photo} alt="" className="modal__chip-img" />
+                                        ) : (
+                                            <span className="modal__chip-initials">{initialsOf(c.username)}</span>
+                                        )}
+                                        <span className="modal__chip-name">{c.username}</span>
+                                        <X size={12} className="modal__chip-x" />
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    )}
+
+                    {/* Member list */}
+                    <div className="modal__list">
+                        {filteredContacts.length === 0 ? (
+                            <div className="modal__empty">No contacts found</div>
+                        ) : (
+                            filteredContacts.map((contact) => {
+                                const id = String(contact.id);
+                                const isChecked = selected.has(id);
+                                return (
+                                    <button
+                                        key={id}
+                                        type="button"
+                                        onClick={() => toggleMember(id)}
+                                        className={`modal__row${isChecked ? " modal__row--checked" : ""}`}
+                                    >
+                                        <span className="modal__row-avatar">
+                                            {contact.profile_photo ? (
+                                                <img src={contact.profile_photo} alt="" />
+                                            ) : (
+                                                initialsOf(contact.username)
+                                            )}
+                                        </span>
+
+                                        <span className="modal__row-body">
+                                            <span className="modal__row-name">{contact.username}</span>
+                                            {contact.email && (
+                                                <span className="modal__row-email">{contact.email}</span>
+                                            )}
+                                        </span>
+
+                                        <span className={`modal__checkbox${isChecked ? " modal__checkbox--on" : ""}`}>
+                                            {isChecked && <Check size={12} strokeWidth={3} />}
+                                        </span>
+                                    </button>
+                                );
+                            })
+                        )}
+                    </div>
+                </div>
 
                 {/* Footer */}
-                <div style={{ padding: 16, borderTop: `1px solid ${C.border}` }}>
+                <div className="modal__footer">
+                    {error && <div className="modal__error">{error}</div>}
                     <button
+                        className="modal__submit"
                         onClick={handleCreate}
                         disabled={isCreating}
-                        style={{
-                            width: "100%",
-                            height: 38,
-                            borderRadius: 8,
-                            border: "none",
-                            background: isCreating ? "#2a2f33" : C.accent,
-                            color: isCreating ? C.muted : "#0F1113",
-                            fontSize: 13,
-                            fontWeight: 700,
-                            cursor: isCreating ? "default" : "pointer",
-                        }}
                     >
-                        {isCreating ? "Creating…" : `Create group${selected.size > 0 ? ` (${selected.size})` : ""}`}
+                        {isCreating ? (
+                            <>
+                                <span className="modal__spinner" />
+                                Creating…
+                            </>
+                        ) : (
+                            `Create group${selected.size > 0 ? ` (${selected.size})` : ""}`
+                        )}
                     </button>
                 </div>
             </div>

@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 
 	"golang-jwt-project/internal/middleware"
@@ -70,6 +71,7 @@ func (h *MessageHandler) Delete(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"message": "message not found or not owned by you"})
 			return
 		}
+		log.Printf("delete message %s failed: %v", c.Param("id"), err) // <-- this line
 		c.JSON(http.StatusInternalServerError, gin.H{"message": "failed to delete message"})
 		return
 	}

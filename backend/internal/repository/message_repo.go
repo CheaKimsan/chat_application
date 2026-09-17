@@ -6,7 +6,10 @@ import (
 	"encoding/json"
 	"errors"
 	"golang-jwt-project/internal/models"
+	"golang-jwt-project/internal/ws"
 	"log"
+
+	"github.com/lib/pq"
 )
 
 type MessageRepository struct {
@@ -17,28 +20,36 @@ func NewMessageRepository(db *sql.DB) *MessageRepository {
 	return &MessageRepository{db: db}
 }
 
+// GetConversation now includes soft-deleted rows (tombstones) instead of
+// silently dropping them, so a deleted message keeps its place in the
+// timeline across reloads. Attachments are hidden for deleted messages
+// since the message content itself is gone.
 func (r *MessageRepository) GetConversation(ctx context.Context, callerID, otherID string) ([]models.MessageResponse, error) {
 	rows, err := r.db.QueryContext(
 		ctx,
 		`SELECT
 			m.id, m.from_user, m.to_user, m.conversation_id, m.body, m.nonce, m.created_at, m.read_at,
-			COALESCE(
-				json_agg(
-					json_build_object(
-						'id', a.id,
-						'message_id', a.message_id::text,
-						'type', a.type,
-						'url', a.url,
-						'filename', a.filename,
-						'mime_type', a.mime_type,
-						'size_bytes', a.size_bytes,
-						'created_at', a.created_at
-					) ORDER BY a.created_at
-				) FILTER (WHERE a.id IS NOT NULL),
-				'[]'
-			) AS attachments
+			(m.deleted_at IS NOT NULL) AS is_deleted,
+			(m.edited_at IS NOT NULL) AS is_edited,
+			CASE WHEN m.deleted_at IS NOT NULL THEN '[]'::json ELSE
+				COALESCE(
+					json_agg(
+						json_build_object(
+							'id', a.id,
+							'message_id', a.message_id::text,
+							'type', a.type,
+							'url', a.url,
+							'filename', a.filename,
+							'mime_type', a.mime_type,
+							'size_bytes', a.size_bytes,
+							'created_at', a.created_at
+						) ORDER BY a.created_at
+					) FILTER (WHERE a.id IS NOT NULL),
+					'[]'
+				)
+			END AS attachments
 		FROM messages m
-		LEFT JOIN attachments a ON a.message_id = m.id
+		LEFT JOIN attachments a ON a.message_id = m.id AND m.deleted_at IS NULL
 		WHERE m.conversation_id IN (
 			SELECT cm1.conversation_id
 			FROM conversation_members cm1
@@ -67,7 +78,7 @@ func (r *MessageRepository) GetConversation(ctx context.Context, callerID, other
 
 		if err := rows.Scan(
 			&m.ID, &m.FromUser, &toUser, &conversationID, &m.Body, &m.Nonce, &m.CreatedAt, &m.ReadAt,
-			&attachmentsRaw,
+			&m.IsDeleted, &m.IsEdited, &attachmentsRaw,
 		); err != nil {
 			return nil, err
 		}
@@ -110,11 +121,12 @@ func (r *MessageRepository) Update(ctx context.Context, messageID, fromUser stri
 
 	err := r.db.QueryRowContext(ctx,
 		`UPDATE messages
-			SET body = $1, nonce = $2
-			WHERE id = $3 AND from_user = $4
-			RETURNING id, from_user, to_user, conversation_id, body, nonce, created_at, read_at`,
+			SET body = $1, nonce = $2, edited_at = now()
+			WHERE id = $3 AND from_user = $4 AND deleted_at IS NULL
+			RETURNING id, from_user, to_user, conversation_id, body, nonce, created_at, read_at,
+			          (edited_at IS NOT NULL) AS is_edited`,
 		ciphertext, nonce, messageID, fromUser,
-	).Scan(&msg.ID, &msg.FromUser, &toUser, &conversationID, &msg.Body, &msg.Nonce, &msg.CreatedAt, &msg.ReadAt)
+	).Scan(&msg.ID, &msg.FromUser, &toUser, &conversationID, &msg.Body, &msg.Nonce, &msg.CreatedAt, &msg.ReadAt, &msg.IsEdited)
 	if err != nil {
 		return models.MessageResponse{}, "", err
 	}
@@ -135,13 +147,32 @@ func (r *MessageRepository) Update(ctx context.Context, messageID, fromUser stri
 	return msg, broadcastTarget, nil
 }
 
+// Delete soft-deletes the message: the row stays, body/nonce are cleared
+// server-side so no ciphertext lingers in storage, and deleted_at is set.
+// The WHERE clause also guards against double-deleting an already
+// tombstoned row. Returns the conversation to broadcast the tombstone to
+// (falls back to legacy to_user for pre-migration rows with no
+// conversation_id).
 func (r *MessageRepository) Delete(ctx context.Context, messageID, fromUser string) (string, error) {
-	var toUser string
+	var toUser sql.NullString
+	var conversationID sql.NullString
+
 	err := r.db.QueryRowContext(ctx,
-		`DELETE FROM messages WHERE id = $1 AND from_user = $2 RETURNING to_user`,
+		`UPDATE messages
+		 SET deleted_at = now(), body = NULL, nonce = NULL
+		 WHERE id = $1 AND from_user = $2 AND deleted_at IS NULL
+		 RETURNING to_user, conversation_id`,
 		messageID, fromUser,
-	).Scan(&toUser)
-	return toUser, err
+	).Scan(&toUser, &conversationID)
+	if err != nil {
+		return "", err
+	}
+
+	broadcastTarget := conversationID.String
+	if broadcastTarget == "" {
+		broadcastTarget = toUser.String
+	}
+	return broadcastTarget, nil
 }
 
 // MarkRead marks the message as read if it belongs to callerID and hasn't
@@ -164,7 +195,7 @@ func (r *MessageRepository) MarkRead(ctx context.Context, msgID, callerID string
 func (r *MessageRepository) ExistsFromUser(ctx context.Context, messageID, callerID string) (bool, error) {
 	var exists bool
 	err := r.db.QueryRowContext(ctx,
-		`SELECT EXISTS (SELECT 1 FROM messages WHERE id = $1 AND from_user = $2)`,
+		`SELECT EXISTS (SELECT 1 FROM messages WHERE id = $1 AND from_user = $2 AND deleted_at IS NULL)`,
 		messageID, callerID,
 	).Scan(&exists)
 	return exists, err
@@ -290,9 +321,14 @@ func (r *MessageRepository) CreateInConversation(ctx context.Context, fromUser, 
 	return msg, err
 }
 
+// GetByConversationID — same tombstone-inclusive treatment as
+// GetConversation: soft-deleted rows are returned with is_deleted=true
+// instead of being filtered out, so a delete survives a page reload.
 func (r *MessageRepository) GetByConversationID(ctx context.Context, conversationID string) ([]models.MessageResponse, error) {
 	rows, err := r.db.QueryContext(ctx, `
-			SELECT id, from_user, conversation_id, body, nonce, created_at, read_at
+			SELECT id, from_user, conversation_id, body, nonce, created_at, read_at,
+			       (deleted_at IS NOT NULL) AS is_deleted,
+			       (edited_at IS NOT NULL) AS is_edited
 			FROM messages WHERE conversation_id = $1 ORDER BY created_at ASC
 		`, conversationID)
 	if err != nil {
@@ -301,14 +337,48 @@ func (r *MessageRepository) GetByConversationID(ctx context.Context, conversatio
 	defer rows.Close()
 
 	var out []models.MessageResponse
+	var ids []string
 	for rows.Next() {
 		var m models.MessageResponse
-		if err := rows.Scan(&m.ID, &m.FromUser, &m.ConversationID, &m.Body, &m.Nonce, &m.CreatedAt, &m.ReadAt); err != nil {
+		if err := rows.Scan(&m.ID, &m.FromUser, &m.ConversationID, &m.Body, &m.Nonce, &m.CreatedAt, &m.ReadAt, &m.IsDeleted, &m.IsEdited); err != nil {
 			return nil, err
 		}
 		out = append(out, m)
+		ids = append(ids, m.ID)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(out) == 0 {
+		return out, nil
+	}
+
+	attRows, err := r.db.QueryContext(ctx, `
+			SELECT id, message_id, type, url, filename, mime_type, size_bytes, created_at
+			FROM attachments WHERE message_id = ANY($1)
+		`, pq.Array(ids))
+	if err != nil {
+		return nil, err
+	}
+	defer attRows.Close()
+
+	byMessage := make(map[string][]ws.Attachment)
+	for attRows.Next() {
+		var a ws.Attachment
+		if err := attRows.Scan(&a.ID, &a.MessageID, &a.Type, &a.URL, &a.Filename, &a.MimeType, &a.SizeBytes, &a.CreatedAt); err != nil {
+			return nil, err
+		}
+		byMessage[a.MessageID] = append(byMessage[a.MessageID], a)
+	}
+	if err := attRows.Err(); err != nil {
+		return nil, err
+	}
+
+	for i := range out {
+		out[i].Attachments = byMessage[out[i].ID]
+	}
+
+	return out, nil
 }
 
 // GetConversationAndSender is used by NotifyAttachments to look up a
