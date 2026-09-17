@@ -13,6 +13,7 @@ import { reqSendMessage, reqUploadFile, reqCreateGroup, reqListConversations } f
 import { Camera, Lock, MessageCircle, Mic, Paperclip, Send, Square } from 'lucide-react';
 import CallPanel from '../../components/call/CallPanel';
 import CreateGroupModal from '../../components/message/CreateGroupModal';
+import GroupCallPanel from '../../components/call/GroupCall';
 
 export type Conversation = {
     id: string;
@@ -513,6 +514,20 @@ export default function Layout() {
             <main className="layout-main">
                 {(selectedContact || selectedGroup) && <ChatHeader contact={contact} isTyping={isTyping} />}
                 {selectedContact && <CallPanel contactId={selectedContact.id} />}
+                {selectedGroup && (
+                    <GroupCallPanel
+                        conversationId={selectedGroup.id}
+                        members={selectedGroup.members
+                            .filter((m) => String(m.id) !== String(user?.id))       // exclude self
+                            .filter((m) => onlineUsers.has(String(m.id)))           // ✅ only online
+                            .map((m) => ({
+                                id: String(m.id),
+                                username: m.username,
+                                profile_photo: m.profile_photo,
+                            }))
+                        }
+                    />
+                )}
 
                 <div className="layout-user-menu">
                     {user && <UserMenu username={user.username} email={user.email} onLogout={handleLogout} />}

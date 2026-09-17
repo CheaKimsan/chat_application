@@ -18,8 +18,10 @@ type Message struct {
 	Candidate   string       `json:"candidate,omitempty"`
 	SDPMLine    *int         `json:"sdp_m_line_index,omitempty"`
 	SDPMid      string       `json:"sdp_mid,omitempty"`
+	GroupCallID string       `json:"group_call_id,omitempty"` // group ring: distinguishes the group call from any one pairwise leg
+	Members     []string     `json:"members,omitempty"`       // group ring: full roster including the initiator
+	Mode        string       `json:"mode,omitempty"`          // group ring: "audio" | "video"
 }
-
 type Attachment struct {
 	ID         string    `json:"id"`
 	MessageID  string    `json:"message_id"`

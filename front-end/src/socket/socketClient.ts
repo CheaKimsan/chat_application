@@ -223,6 +223,9 @@ export const sendCallSignal = (signal: {
     candidate?: string;
     sdp_m_line_index?: number | null;
     sdp_mid?: string | null;
+    group_call_id?: string;
+    members?: string[];
+    mode?: "audio" | "video";
 }) => {
     console.log("CALL SEND", signal.kind, signal.to_user, signal.call_id);
     send(signal);

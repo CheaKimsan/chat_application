@@ -86,10 +86,39 @@ func HandleIncomingSocketMessage(fromUserID string, raw []byte) (Message, error)
 
 	case "call_offer", "call_answer":
 		sdp, _ := envelope["sdp"].(string)
-		if toUser == "" || callID == "" || sdp == "" {
+
+		// Group "ring" signals (GroupCallPanel.startGroupCall) intentionally
+		// carry no SDP — real per-pair negotiation happens later, over
+		// media_offer/media_answer. Detect that case via `members` and skip
+		// the sdp requirement for it; a real 1:1/pairwise offer still needs sdp.
+		membersRaw, hasMembers := envelope["members"].([]any)
+
+		if !hasMembers && (toUser == "" || callID == "" || sdp == "") {
 			return Message{}, fmt.Errorf("%s requires to_user, call_id and sdp", kind)
 		}
-		return Message{Type: kind, FromUser: fromUserID, ToUser: toUser, CallID: callID, SDP: sdp}, nil
+		if hasMembers && (toUser == "" || callID == "") {
+			return Message{}, fmt.Errorf("%s requires to_user and call_id", kind)
+		}
+
+		msg := Message{Type: kind, FromUser: fromUserID, ToUser: toUser, CallID: callID, SDP: sdp}
+
+		if groupCallID, ok := envelope["group_call_id"].(string); ok {
+			msg.GroupCallID = groupCallID
+		}
+		if mode, ok := envelope["mode"].(string); ok {
+			msg.Mode = mode
+		}
+		if hasMembers {
+			members := make([]string, 0, len(membersRaw))
+			for _, m := range membersRaw {
+				if s, ok := m.(string); ok {
+					members = append(members, s)
+				}
+			}
+			msg.Members = members
+		}
+
+		return msg, nil
 
 	case "ice_candidate":
 		candidate, _ := envelope["candidate"].(string)
