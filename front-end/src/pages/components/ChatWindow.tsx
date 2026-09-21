@@ -7,18 +7,21 @@ import { UserResponse } from "../../components/user/core/model";
 import { LoadingSpinner } from "../../shared/LoadingSpinner";
 import { MessageResponse } from "../../components/message/core/model";
 import {
+    reqAddReaction,
     reqDeleteMessage,
     reqEditMessage,
     reqGetCallHistory,
     reqGetConversationMessages,
     reqGetMessages,
+    reqRemoveReaction,
 } from "../../components/message/core/request";
 import { ArrowDownLeft, ArrowUpRight, Pencil, Phone, Trash2, Video } from "lucide-react";
 
-// Local view-model extension. `deleted`/`edited` aren't (yet) part of the
-// shared MessageResponse type — add them there once the backend starts
-// persisting deleted_at / edited_at, and this alias can be dropped.
-type ChatMessage = MessageResponse & { deleted?: boolean; edited?: boolean };
+type Reaction = { emoji: string; users: string[] };
+
+type ChatMessage = MessageResponse & { deleted?: boolean; edited?: boolean; reactions?: Reaction[] };
+
+const QUICK_REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🙏"];
 
 type CallRecord = {
     id: string;
@@ -91,6 +94,7 @@ export default function ChatWindow() {
     const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
     const [editingText, setEditingText] = useState("");
     const [openMessageMenuId, setOpenMessageMenuId] = useState<string | null>(null);
+    const [openReactionPickerId, setOpenReactionPickerId] = useState<string | null>(null);
     const bottomRef = useRef<HTMLDivElement | null>(null);
 
     const conversationId = selectedConversation?.id;
@@ -156,11 +160,6 @@ export default function ChatWindow() {
                 const result = await reqGetMessages(contactId!);
                 list = Array.isArray(result) ? result : (result as any)?.messages ?? [];
             }
-            // Server marks soft-deleted / edited rows with is_deleted /
-            // is_edited; map those onto the `deleted` / `edited` flags the
-            // renderer checks, same as the live socket paths do — so
-            // refreshing the page still shows the tombstone and the
-            // "Edited" label instead of losing that state.
             return list.map((m) => ({
                 ...m,
                 ...(m.is_deleted ? { deleted: true, body: "", attachments: [] } : {}),
@@ -263,7 +262,6 @@ export default function ChatWindow() {
             queryClient.setQueryData<ChatMessage[]>(messagesQueryKey, (prev = []) => {
                 const matched = prev.some((m) => String(m.id) === String(attachment.message_id));
                 if (!matched) {
-                    // message not in cache yet (id race, or message not loaded) — refetch instead of dropping it
                     queryClient.invalidateQueries({ queryKey: messagesQueryKey });
                     return prev;
                 }
@@ -326,45 +324,94 @@ export default function ChatWindow() {
         return () => window.removeEventListener("chat:message_read", handleMessageRead);
     }, [queryClient, contactId]);
 
+    // Reaction live updates — MUST stay above the isLoading/error early
+    // returns below, alongside the other effects. Placing hooks after a
+    // conditional return changes the hook count between renders (loading
+    // -> loaded) and React will throw "Rendered fewer/more hooks than
+    // expected".
+    useEffect(() => {
+        if (!activeId) return;
+
+        const upsertReaction = (messageId: string, userId: string, emoji: string, adding: boolean) => {
+            queryClient.setQueryData<ChatMessage[]>(messagesQueryKey, (prev = []) =>
+                prev.map((message) => {
+                    if (String(message.id) !== String(messageId)) return message;
+                    const reactions = message.reactions ? [...message.reactions] : [];
+                    const index = reactions.findIndex((r) => r.emoji === emoji);
+
+                    if (adding) {
+                        if (index === -1) {
+                            reactions.push({ emoji, users: [userId] });
+                        } else if (!reactions[index].users.includes(userId)) {
+                            reactions[index] = { ...reactions[index], users: [...reactions[index].users, userId] };
+                        }
+                    } else if (index !== -1) {
+                        const users = reactions[index].users.filter((id) => id !== userId);
+                        if (users.length === 0) reactions.splice(index, 1);
+                        else reactions[index] = { ...reactions[index], users };
+                    }
+
+                    return { ...message, reactions };
+                })
+            );
+        };
+
+        const handleReactionAdded = (event: Event) => {
+            const { message_id, user_id, emoji } = (event as CustomEvent<{ message_id: string; user_id: string; emoji: string }>).detail;
+            upsertReaction(message_id, user_id, emoji, true);
+        };
+        const handleReactionRemoved = (event: Event) => {
+            const { message_id, user_id, emoji } = (event as CustomEvent<{ message_id: string; user_id: string; emoji: string }>).detail;
+            upsertReaction(message_id, user_id, emoji, false);
+        };
+
+        window.addEventListener("chat:reaction_added", handleReactionAdded);
+        window.addEventListener("chat:reaction_removed", handleReactionRemoved);
+        return () => {
+            window.removeEventListener("chat:reaction_added", handleReactionAdded);
+            window.removeEventListener("chat:reaction_removed", handleReactionRemoved);
+        };
+    }, [queryClient, activeId, conversationId, contactId]);
+
+    const toggleReaction = async (message: ChatMessage, emoji: string) => {
+        const mine = message.reactions?.find((r) => r.emoji === emoji)?.users.includes(String(user?.id));
+        try {
+            if (mine) {
+                await reqRemoveReaction(message.id, emoji);
+            } else {
+                await reqAddReaction(message.id, emoji);
+            }
+        } catch (error) {
+            console.error("Failed to toggle reaction:", error);
+        }
+    };
+
     if (isLoading) {
         return (
             <div className="chat-window chat-window--loading">
                 <div className="skeleton-thread">
-                    {/* Received message */}
                     <div className="skeleton-msg skeleton-msg--left">
                         <div className="skeleton-avatar" />
                         <div className="skeleton-bubble" style={{ width: "42%" }} />
                     </div>
-
-                    {/* Sent message */}
                     <div className="skeleton-msg skeleton-msg--right">
                         <div className="skeleton-bubble" style={{ width: "28%" }} />
                     </div>
-
-                    {/* Received (2 lines) */}
                     <div className="skeleton-msg skeleton-msg--left">
                         <div className="skeleton-avatar" />
                         <div className="skeleton-bubble skeleton-bubble--tall" style={{ width: "58%" }} />
                     </div>
-
-                    {/* Sent */}
                     <div className="skeleton-msg skeleton-msg--right">
                         <div className="skeleton-bubble" style={{ width: "36%" }} />
                     </div>
-
-                    {/* Received */}
                     <div className="skeleton-msg skeleton-msg--left">
                         <div className="skeleton-avatar" />
                         <div className="skeleton-bubble" style={{ width: "48%" }} />
                     </div>
-
-                    {/* Sent (short) */}
                     <div className="skeleton-msg skeleton-msg--right">
                         <div className="skeleton-bubble" style={{ width: "22%" }} />
                     </div>
                 </div>
-
-                {/* Loading indicator at bottom */}
                 <div className="chat-window__loader">
                     <span className="chat-window__loader-dot" />
                     <span className="chat-window__loader-dot" />
@@ -523,10 +570,6 @@ export default function ChatWindow() {
                                             const url = attachment.url || "";
                                             const mime = attachment.mime_type || "";
                                             const type = attachment.type || "";
-
-                                            // Detect by MIME, then by type, then by file extension.
-                                            // .webm is ambiguous — treat it as AUDIO when the backend
-                                            // labeled it audio/voice, otherwise use MIME prefix.
                                             const hasWebmExt = /\.webm(\?|$)/i.test(url);
 
                                             const isImage =
@@ -655,6 +698,55 @@ export default function ChatWindow() {
                                             </div>
                                         )
                                     )
+                                )}
+
+                                {!m.deleted && (
+                                    <div className="message-reaction-row">
+                                        {(m.reactions ?? []).map((reaction) => {
+                                            const mine = reaction.users.includes(String(user?.id));
+                                            return (
+                                                <button
+                                                    type="button"
+                                                    key={reaction.emoji}
+                                                    className={`message-reaction-badge${mine ? " message-reaction-badge--mine" : ""}`}
+                                                    onClick={() => void toggleReaction(m, reaction.emoji)}
+                                                    title={reaction.users.join(", ")}
+                                                >
+                                                    {reaction.emoji} {reaction.users.length}
+                                                </button>
+                                            );
+                                        })}
+
+                                        <div className="message-reaction-add-wrap">
+                                            <button
+                                                type="button"
+                                                className="message-reaction-add-trigger"
+                                                onClick={() =>
+                                                    setOpenReactionPickerId(openReactionPickerId === m.id ? null : m.id)
+                                                }
+                                                title="Add reaction"
+                                            >
+                                                🙂+
+                                            </button>
+                                            {openReactionPickerId === m.id && (
+                                                <div className="message-reaction-picker">
+                                                    {QUICK_REACTIONS.map((emoji) => (
+                                                        <button
+                                                            type="button"
+                                                            key={emoji}
+                                                            className="message-reaction-picker__item"
+                                                            onClick={() => {
+                                                                void toggleReaction(m, emoji);
+                                                                setOpenReactionPickerId(null);
+                                                            }}
+                                                        >
+                                                            {emoji}
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
                                 )}
 
                                 <span className="message-time">

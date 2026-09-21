@@ -14,12 +14,19 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// CHANGED: service/inviteService are now interfaces (AuthServicer /
+// InviteServicer, defined in auth_interfaces.go) instead of concrete
+// *services.AuthService / *services.InviteService pointers. This is the
+// only change from your original file — everything below is identical.
+// *services.AuthService and *services.InviteService already implement
+// these interfaces, so NewAuthHandler(...) call sites elsewhere in your
+// app don't need to change at all.
 type AuthHandler struct {
-	service       *services.AuthService
-	inviteService *services.InviteService
+	service       AuthServicer
+	inviteService InviteServicer
 }
 
-func NewAuthHandler(service *services.AuthService, inviteService *services.InviteService) *AuthHandler {
+func NewAuthHandler(service AuthServicer, inviteService InviteServicer) *AuthHandler {
 	return &AuthHandler{service: service, inviteService: inviteService}
 }
 

@@ -80,6 +80,14 @@ export const connectSocket = async (token?: string) => {
             return;
         }
 
+        if (payload.type === "reaction_added") {
+            emitChatEvent("chat:reaction_added", payload);
+        }
+        if (payload.type === "reaction_removed") {
+            emitChatEvent("chat:reaction_removed", payload);
+        }
+
+
         if (["call_offer", "call_answer", "ice_candidate", "call_end", "call_reject", "call_busy", "call_failed"].includes(payload.type)) {
             console.log("CALL RECEIVE", payload.type, payload.from_user, payload.call_id);
             emitChatEvent("chat:call", payload);
@@ -172,6 +180,9 @@ export const connectSocket = async (token?: string) => {
             console.error("socket reconnect failed, refresh token likely expired:", err);
         }
     };
+
+
+
 };
 
 export const disconnectSocket = () => {
@@ -241,3 +252,4 @@ export const sendMediaSignal = (signal: {
 }) => {
     send(signal);
 };
+

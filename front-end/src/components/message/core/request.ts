@@ -191,3 +191,9 @@ export async function reqListConversations() {
     const res = await apiClient.get('/messages/conversations');
     return res.data.conversations ?? [];
 }
+
+export const reqAddReaction = (messageId: string, emoji: string) =>
+    apiClient.post(`/messages/${messageId}/reactions`, { emoji });
+
+export const reqRemoveReaction = (messageId: string, emoji: string) =>
+    apiClient.delete(`/messages/${messageId}/reactions`, { params: { emoji } });

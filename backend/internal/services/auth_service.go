@@ -314,7 +314,6 @@ func (s *AuthService) sendPlainEmail(to, subject, body string) error {
 }
 
 // --- added: session management (used by SessionHandler) ---
-
 func (s *AuthService) List(ctx context.Context, userID string) ([]models.SessionResponse, error) {
 	rows, err := s.refreshTokens.ListActiveForUser(ctx, userID)
 	if err != nil {

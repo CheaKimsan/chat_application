@@ -37,11 +37,14 @@ func (h *MessageHandler) RegisterRoutes(router *gin.RouterGroup) {
 	router.PATCH("/:id/edit", h.Edit)
 	router.DELETE("/:id", h.Delete)
 	router.PATCH("/:id/read", h.MarkRead)
-	router.POST("/:messageId/upload", h.Upload)
+	router.POST("/:id/upload", h.Upload) // was :messageId
 
-	router.GET("/conversation/:id", h.GetConversationByID) // NEW
-	router.POST("/conversations", h.CreateGroup)           // NEW
+	router.GET("/conversation/:id", h.GetConversationByID)
+	router.POST("/conversations", h.CreateGroup)
 	router.GET("/conversations", h.ListConversations)
+
+	router.POST("/:id/reactions", h.AddReaction)      // was :messageId
+	router.DELETE("/:id/reactions", h.RemoveReaction) // was :messageId
 }
 
 func (h *MessageHandler) Edit(c *gin.Context) {
@@ -256,4 +259,52 @@ func (h *MessageHandler) ListConversations(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"conversations": convs})
+}
+
+func (h *MessageHandler) AddReaction(c *gin.Context) {
+	callerID, _ := middleware.CallerFromContext(c)
+	if callerID == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"message": "unauthorized"})
+		return
+	}
+
+	var req struct {
+		Emoji string `json:"emoji" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "emoji is required"})
+		return
+	}
+
+	messageID := c.Param("id")
+	if err := h.messages.AddReaction(c.Request.Context(), callerID, messageID, req.Emoji); err != nil {
+		log.Printf("add reaction failed: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"message": "failed to add reaction"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "reaction added"})
+}
+
+func (h *MessageHandler) RemoveReaction(c *gin.Context) {
+	callerID, _ := middleware.CallerFromContext(c)
+	if callerID == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"message": "unauthorized"})
+		return
+	}
+
+	emoji := c.Query("emoji")
+	if emoji == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "emoji is required"})
+		return
+	}
+
+	messageID := c.Param("id")
+	if err := h.messages.RemoveReaction(c.Request.Context(), callerID, messageID, emoji); err != nil {
+		log.Printf("remove reaction failed: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"message": "failed to remove reaction"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "reaction removed"})
 }

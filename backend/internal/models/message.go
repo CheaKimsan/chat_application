@@ -40,3 +40,8 @@ type ConversationResponse struct {
 	CreatedAt time.Time `json:"created_at"`
 	MemberIDs []string  `json:"member_ids"`
 }
+
+type Reaction struct {
+	Emoji string   `json:"emoji"`
+	Users []string `json:"users"` // user ids who reacted with this emoji
+}
