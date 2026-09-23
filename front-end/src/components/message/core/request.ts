@@ -23,16 +23,23 @@ export const reqGetCallHistory = async (contactId: string | number): Promise<Cal
     const response = await apiClient.get<{ calls: CallHistoryResponse[] }>(`/calls/${contactId}`);
     return response.data.calls ?? [];
 };
+export const reqGetGroupCallHistory = async (groupId: string): Promise<CallHistoryResponse[]> => {
+    const response = await apiClient.get<{ calls: CallHistoryResponse[] }>(`/groups/${groupId}/call-history`);
+    return response.data.calls ?? [];
+};
 
 export const reqCreateCallHistory = async (data: {
     call_id: string;
-    to_user: string;
+    to_user?: string;
+    group_id?: string;
+    participant_ids?: string[];
     mode: "audio" | "video";
     status: string;
     duration_seconds?: number;
 }) => {
     await apiClient.post("/calls", data);
 };
+
 
 export const reqGetMessages = async (contactId: string | number): Promise<MessageResponse[]> => {
 

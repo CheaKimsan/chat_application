@@ -2,9 +2,11 @@ import { useEffect, useRef, useState } from "react";
 import { Camera, Mic, MicOff, Phone, PhoneOff, Users, Video, VideoOff } from "lucide-react";
 import { sendCallSignal, sendMediaSignal } from "../../socket/socketClient";
 import { useAuthStore } from "../../store/auth.store";
+import { reqCreateCallHistory } from "../message/core/request";
 
 type CallMode = "audio" | "video";
 type CallState = "idle" | "ringing" | "incoming" | "active";
+type CallHistoryStatus = "calling" | "incoming" | "connected" | "completed" | "missed" | "rejected" | "busy" | "failed";
 
 export type GroupMember = { id: string; username: string; profile_photo?: string };
 
@@ -140,11 +142,38 @@ export default function GroupCallPanel({ conversationId, members }: GroupCallPan
     const localDetectorRef = useRef<SpeakingDetector | null>(null);
     const bufferedMediaRef = useRef<MediaSignal[]>([]);
     const videoElsRef = useRef<Map<string, HTMLVideoElement>>(new Map());
+    // Call-history tracking — mirrors CallPanel.tsx's addHistory/finishHistory
+    // pattern, but writes group_id + participant_ids instead of to_user so
+    // the row shows up under GET /groups/:groupId/call-history for everyone
+    // on the call, not just a single 1:1 pair.
+    const historyFinishedRef = useRef(false);
+    const callStartedAtRef = useRef<number | null>(null);
 
     const bump = () => setLegVersion((v) => v + 1);
 
     const memberUsername = (id: string) =>
         members.find((m) => String(m.id) === id)?.username ?? id;
+
+    const addHistory = (status: CallHistoryStatus, mode: CallMode, durationSeconds?: number) => {
+        if (!groupCallIdRef.current) return;
+        const participantIds = rosterRef.current.filter((id) => id !== currentUserId);
+        void reqCreateCallHistory({
+            call_id: groupCallIdRef.current,
+            group_id: conversationId,
+            participant_ids: participantIds,
+            mode,
+            status,
+            duration_seconds: durationSeconds,
+        }).catch((error) => console.error("Failed to save group call history:", error));
+    };
+
+    const finishHistory = (status: CallHistoryStatus, mode: CallMode) => {
+        if (historyFinishedRef.current) return;
+        historyFinishedRef.current = true;
+        const startedAt = callStartedAtRef.current;
+        addHistory(status, mode, startedAt ? Math.max(0, Math.floor((Date.now() - startedAt) / 1000)) : undefined);
+        callStartedAtRef.current = null;
+    };
 
     const getLocalMedia = async (mode: CallMode) => {
         if (localStreamRef.current) return localStreamRef.current;
@@ -328,6 +357,9 @@ export default function GroupCallPanel({ conversationId, members }: GroupCallPan
         try {
             await getLocalMedia(mode);
             setStatusMessage(null);
+            historyFinishedRef.current = false;
+            callStartedAtRef.current = Date.now();
+            addHistory("calling", mode);
             members.forEach((member) => {
                 sendCallSignal({
                     kind: "call_offer",
@@ -341,6 +373,7 @@ export default function GroupCallPanel({ conversationId, members }: GroupCallPan
             bootstrapMesh();
         } catch (error) {
             console.error("Could not start group call:", error);
+            finishHistory("failed", mode);
             endGroupCall();
         }
     };
@@ -351,9 +384,12 @@ export default function GroupCallPanel({ conversationId, members }: GroupCallPan
             await getLocalMedia(callMode);
             setCallState("active");
             setStatusMessage(null);
+            callStartedAtRef.current = callStartedAtRef.current ?? Date.now();
+            addHistory("connected", callMode);
             bootstrapMesh();
         } catch (error) {
             console.error("Could not accept group call:", error);
+            finishHistory("failed", callMode);
             declineGroupCall();
         }
     };
@@ -366,6 +402,7 @@ export default function GroupCallPanel({ conversationId, members }: GroupCallPan
                 call_id: groupCallIdRef.current,
             });
         }
+        finishHistory("rejected", callMode);
         resetState();
     };
 
@@ -380,6 +417,7 @@ export default function GroupCallPanel({ conversationId, members }: GroupCallPan
                 });
             }
         });
+        finishHistory(callStateRef.current === "active" ? "completed" : "missed", callMode);
         resetState();
     };
 
@@ -415,6 +453,8 @@ export default function GroupCallPanel({ conversationId, members }: GroupCallPan
                 setCallMode(signal.mode ?? "audio");
                 setIncomingFrom(signal.from_user);
                 setCallState("incoming");
+                historyFinishedRef.current = false;
+                addHistory("incoming", signal.mode ?? "audio");
                 return;
             }
 

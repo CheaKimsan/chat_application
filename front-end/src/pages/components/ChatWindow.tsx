@@ -12,6 +12,7 @@ import {
     reqEditMessage,
     reqGetCallHistory,
     reqGetConversationMessages,
+    reqGetGroupCallHistory,
     reqGetMessages,
     reqRemoveReaction,
 } from "../../components/message/core/request";
@@ -115,14 +116,16 @@ export default function ChatWindow() {
         : ["messages", contactId];
 
     useEffect(() => {
-        if (!selectedContact?.id) {
+        if (!activeId) {
             setCallHistory([]);
             return;
         }
-        const key = `call-history-${selectedContact.id}`;
+        const key = `call-history-${activeId}`;
         const loadHistory = async () => {
             try {
-                const remoteRecords = await reqGetCallHistory(selectedContact.id);
+                const remoteRecords = isGroup
+                    ? await reqGetGroupCallHistory(conversationId!)
+                    : await reqGetCallHistory(contactId!);
                 const records = remoteRecords.map((record) => ({
                     id: record.id,
                     call_id: record.call_id,
@@ -138,14 +141,16 @@ export default function ChatWindow() {
             }
         };
         const handleHistory = (event: Event) => {
-            const detail = (event as CustomEvent<{ contactId: string | number; records: CallRecord[] }>).detail;
-            if (String(detail.contactId) === String(selectedContact.id)) setCallHistory(detail.records);
+            const detail = (event as CustomEvent<{ contactId?: string | number; groupId?: string; records: CallRecord[] }>).detail;
+            const matches = isGroup
+                ? String(detail.groupId) === String(conversationId)
+                : String(detail.contactId) === String(contactId);
+            if (matches) setCallHistory(detail.records);
         };
         void loadHistory();
         window.addEventListener("chat:call_history", handleHistory);
         return () => window.removeEventListener("chat:call_history", handleHistory);
-    }, [selectedContact?.id]);
-
+    }, [activeId, isGroup, conversationId, contactId]);
     const {
         data: messages = [],
         isLoading,

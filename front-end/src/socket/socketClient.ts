@@ -94,6 +94,27 @@ export const connectSocket = async (token?: string) => {
             return;
         }
 
+        // Server pushes this once a call_history row has been written
+        // (on call end/miss/reject/etc.), so open chat windows can show
+        // the new call card immediately instead of waiting for the next
+        // full reload of ChatWindow's call-history query. The record's
+        // shape mirrors CallHistoryResponse from request.ts: 1:1 calls
+        // carry to_user, group calls carry group_id instead — branch the
+        // dispatched detail so ChatWindow's listener (which matches on
+        // either contactId or groupId depending on the open conversation)
+        // can find the right one.
+        if (payload.type === "call_history") {
+            const record = payload.record ?? payload;
+            const records = [record];
+            if (record.group_id) {
+                emitChatEvent("chat:call_history", { groupId: record.group_id, records });
+            } else {
+                const contactId = record.from_user === payload.viewer_id ? record.to_user : record.from_user;
+                emitChatEvent("chat:call_history", { contactId: contactId ?? record.to_user ?? record.from_user, records });
+            }
+            return;
+        }
+
         if (payload.type === "new_message") {
             const msg = payload.message;
 
@@ -252,4 +273,3 @@ export const sendMediaSignal = (signal: {
 }) => {
     send(signal);
 };
-

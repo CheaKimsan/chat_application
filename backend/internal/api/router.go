@@ -132,6 +132,10 @@ func NewRouter(db *sql.DB, pool *ws.Pool, jwtSecret []byte, refreshSecret []byte
 		calls.GET("/:userId", callHistoryHandler.List)
 		calls.POST("", callHistoryHandler.Create)
 
+		groups := api.Group("/groups")
+		groups.Use(middleware.AuthMiddleware(jwtSecret))
+		groups.GET("/:groupId/call-history", callHistoryHandler.ListByGroup)
+
 		// GET /invites/validate is public — the invitee isn't logged in
 		// yet when checking their invite link on the signup page.
 		api.GET("/invites/validate", inviteHandler.ValidateInvite)

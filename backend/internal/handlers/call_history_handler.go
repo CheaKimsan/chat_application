@@ -28,6 +28,15 @@ func (h *CallHistoryHandler) List(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"calls": records})
 }
 
+func (h *CallHistoryHandler) ListByGroup(c *gin.Context) {
+	records, err := h.repo.ListByGroup(c.Request.Context(), c.Param("groupId"))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"message": "failed to load call history"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"calls": records})
+}
+
 func (h *CallHistoryHandler) Create(c *gin.Context) {
 	callerID, _ := middleware.CallerFromContext(c)
 	var req models.CreateCallHistoryRequest
@@ -37,6 +46,10 @@ func (h *CallHistoryHandler) Create(c *gin.Context) {
 	}
 	if req.Mode != "audio" && req.Mode != "video" {
 		c.JSON(http.StatusBadRequest, gin.H{"message": "mode must be audio or video"})
+		return
+	}
+	if req.ToUser == "" && req.GroupID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "to_user or group_id is required"})
 		return
 	}
 	record, err := h.repo.Create(c.Request.Context(), callerID, req)
