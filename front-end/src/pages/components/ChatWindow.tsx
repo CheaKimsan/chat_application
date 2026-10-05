@@ -2,7 +2,6 @@ import { Fragment, useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useOutletContext } from "react-router-dom";
 import { useAuthStore } from "../../store/auth.store";
-import { sendMarkRead } from "../../socket/socketClient";
 import { UserResponse } from "../../components/user/core/model";
 import { LoadingSpinner } from "../../shared/LoadingSpinner";
 import { MessageResponse } from "../../components/message/core/model";
@@ -14,9 +13,10 @@ import {
     reqGetConversationMessages,
     reqGetGroupCallHistory,
     reqGetMessages,
+    reqMarkMessageRead,
     reqRemoveReaction,
 } from "../../components/message/core/request";
-import { ArrowDownLeft, ArrowUpRight, Pencil, Phone, Trash2, Video } from "lucide-react";
+import { ArrowDownLeft, ArrowUpRight, Check, CheckCheck, Pencil, Phone, Trash2, Video } from "lucide-react";
 
 type Reaction = { emoji: string; users: string[] };
 
@@ -97,6 +97,7 @@ export default function ChatWindow() {
     const [openMessageMenuId, setOpenMessageMenuId] = useState<string | null>(null);
     const [openReactionPickerId, setOpenReactionPickerId] = useState<string | null>(null);
     const bottomRef = useRef<HTMLDivElement | null>(null);
+    const readReceiptRequestsRef = useRef(new Set<string>());
 
     const conversationId = selectedConversation?.id;
     const contactId = selectedContact?.id;
@@ -301,39 +302,57 @@ export default function ChatWindow() {
     }, [activeId]);
 
     useEffect(() => {
-        if (!contactId || messages.length === 0) return;
+        if (!activeId || !user?.id || messages.length === 0) return;
 
-        const hasUnreadFromContact = messages.some(
-            (m) => String(m.from_user) === String(contactId) && !m.read_at
+        const unreadMessages = messages.filter(
+            (message) => String(message.from_user) !== String(user.id)
+                && (isGroup
+                    ? !message.read_by?.some((readerId) => String(readerId) === String(user.id))
+                    : String(message.from_user) === String(contactId) && !message.read_at)
+                && !readReceiptRequestsRef.current.has(message.id)
         );
-        if (hasUnreadFromContact) {
-            sendMarkRead(contactId);
-        }
-    }, [contactId, messages]);
+        unreadMessages.forEach((message) => {
+            readReceiptRequestsRef.current.add(message.id);
+            void reqMarkMessageRead(message.id).catch((error) => {
+                readReceiptRequestsRef.current.delete(message.id);
+                console.error("Failed to mark message as seen:", error);
+            });
+        });
+    }, [activeId, contactId, conversationId, isGroup, messages, user?.id]);
 
     useEffect(() => {
-        if (!contactId) return;
+        if (!activeId) return;
 
         const handleMessageRead = (event: Event) => {
-            const { from_user, read_at } = (event as CustomEvent<{ from_user: string; read_at: string }>).detail;
-            if (String(from_user) !== String(contactId)) return;
+            const { message_id, read_by, read_at, conversation_id } = (event as CustomEvent<{
+                message_id: string;
+                read_by: string;
+                read_at: string;
+                conversation_id?: string;
+            }>).detail;
+
+            if (isGroup) {
+                if (String(conversation_id) !== String(conversationId)) return;
+                queryClient.setQueryData<ChatMessage[]>(["messages", "conv", conversationId], (prev = []) =>
+                    prev.map((message) => String(message.id) === String(message_id)
+                        ? { ...message, read_by: Array.from(new Set([...(message.read_by ?? []), String(read_by)])) }
+                        : message)
+                );
+                return;
+            }
+            if (String(read_by) !== String(contactId)) return;
 
             queryClient.setQueryData<ChatMessage[]>(["messages", contactId], (prev = []) =>
                 prev.map((m) =>
-                    String(m.to_user) === String(from_user) && !m.read_at ? { ...m, read_at } : m
+                    String(m.id) === String(message_id) ? { ...m, read_at } : m
                 )
             );
         };
 
         window.addEventListener("chat:message_read", handleMessageRead);
         return () => window.removeEventListener("chat:message_read", handleMessageRead);
-    }, [queryClient, contactId]);
+    }, [queryClient, activeId, contactId, conversationId, isGroup]);
 
-    // Reaction live updates — MUST stay above the isLoading/error early
-    // returns below, alongside the other effects. Placing hooks after a
-    // conditional return changes the hook count between renders (loading
-    // -> loaded) and React will throw "Rendered fewer/more hooks than
-    // expected".
     useEffect(() => {
         if (!activeId) return;
 
@@ -379,13 +398,35 @@ export default function ChatWindow() {
     }, [queryClient, activeId, conversationId, contactId]);
 
     const toggleReaction = async (message: ChatMessage, emoji: string) => {
-        const mine = message.reactions?.find((r) => r.emoji === emoji)?.users.includes(String(user?.id));
+        const uid = String(user?.id);
+        const mine = message.reactions?.find((r) => r.emoji === emoji)?.users.includes(uid);
+
         try {
-            if (mine) {
-                await reqRemoveReaction(message.id, emoji);
-            } else {
-                await reqAddReaction(message.id, emoji);
-            }
+            if (mine) await reqRemoveReaction(message.id, emoji);
+            else await reqAddReaction(message.id, emoji);
+
+            queryClient.setQueryData<ChatMessage[]>(messagesQueryKey, (prev = []) =>
+                prev.map((m) => {
+                    if (String(m.id) !== String(message.id)) return m;
+                    const reactions = [...(m.reactions ?? [])];
+                    const idx = reactions.findIndex((r) => r.emoji === emoji);
+
+                    if (mine && idx >= 0) {
+                        const users = reactions[idx].users.filter((u) => u !== uid);
+                        if (users.length) reactions[idx] = { ...reactions[idx], users };
+                        else reactions.splice(idx, 1);
+                    } else if (!mine) {
+                        if (idx >= 0) {
+                            if (!reactions[idx].users.includes(uid)) {
+                                reactions[idx] = { ...reactions[idx], users: [...reactions[idx].users, uid] };
+                            }
+                        } else {
+                            reactions.push({ emoji, users: [uid] });
+                        }
+                    }
+                    return { ...m, reactions };
+                })
+            );
         } catch (error) {
             console.error("Failed to toggle reaction:", error);
         }
@@ -529,6 +570,8 @@ export default function ChatWindow() {
                 const m = item.message as ChatMessage;
                 const isSelf = String(m.from_user) === String(user?.id);
                 const showReceipt = isSelf && m.id === lastSelfMessageId;
+                const seenByCount = m.read_by?.length ?? 0;
+                const isSeen = isGroup ? seenByCount > 0 : !!m.read_at;
                 const attachments = m.attachments ?? [];
                 const isEditing = editingMessageId === m.id;
                 const canEdit = isSelf && !conversationId && !m.deleted;
@@ -757,7 +800,12 @@ export default function ChatWindow() {
                                 <span className="message-time">
                                     {extractTimeOnly(m.created_at)}
                                     {m.edited && !m.deleted ? " · Edited" : ""}
-                                    {showReceipt ? ` · ${m.read_at ? "Read" : "Delivered"}` : ""}
+                                    {showReceipt && (
+                                        <span className={`message-receipt${isSeen ? " message-receipt--seen" : ""}`}>
+                                            {isSeen ? <CheckCheck size={14} /> : <Check size={14} />}
+                                            {isGroup ? (seenByCount > 0 ? `Seen by ${seenByCount}` : "Delivered") : (isSeen ? "Seen" : "Delivered")}
+                                        </span>
+                                    )}
                                 </span>
 
                                 {isSelf && !isEditing && !m.deleted && openMessageMenuId === m.id && (
@@ -816,4 +864,4 @@ export default function ChatWindow() {
             <div ref={bottomRef} />
         </div>
     );
-}
+}   

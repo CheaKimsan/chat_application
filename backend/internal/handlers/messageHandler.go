@@ -150,7 +150,7 @@ func (h *MessageHandler) Upload(c *gin.Context) {
 		return
 	}
 
-	messageID := c.Param("messageId")
+	messageID := c.Param("id")
 	if messageID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"message": "message ID is required"})
 		return
@@ -227,6 +227,14 @@ func (h *MessageHandler) GetConversationByID(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"message": "failed to fetch messages"})
 		return
 	}
+
+	// NEW: attach reactions so they survive a refresh in group chats
+	if err := h.messages.AttachReactions(c.Request.Context(), messages); err != nil {
+		log.Printf("attach reactions failed: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"message": "failed to load reactions"})
+		return
+	}
+
 	c.JSON(http.StatusOK, gin.H{"messages": messages})
 }
 

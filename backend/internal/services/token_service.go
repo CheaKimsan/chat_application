@@ -40,7 +40,6 @@ func (t *TokenService) GenerateRefreshToken(u models.UserResponse) (string, erro
 	return token.SignedString(t.refreshSecret)
 }
 
-// ParseRefreshToken validates the signature/expiry of a refresh token
 func (t *TokenService) ParseRefreshToken(tokenString string) (jwt.MapClaims, error) {
 	claims := jwt.MapClaims{}
 	token, err := jwt.ParseWithClaims(tokenString, claims, func(tk *jwt.Token) (interface{}, error) {

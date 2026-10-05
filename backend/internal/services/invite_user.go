@@ -61,10 +61,6 @@ func (s *InviteService) SendInvite(ctx context.Context, inviterID, email string)
 
 	return s.sendInviteEmail(email, rawToken)
 }
-
-// ValidateInvite is used by the signup page to check a token before
-// showing the form (and to prefill/lock the email field). It does NOT
-// mark the token used — that happens once signup actually completes.
 func (s *InviteService) ValidateInvite(ctx context.Context, rawToken string) (email string, err error) {
 	email, ok, err := s.invites.Validate(ctx, rawToken)
 	if err != nil {
@@ -76,8 +72,6 @@ func (s *InviteService) ValidateInvite(ctx context.Context, rawToken string) (em
 	return email, nil
 }
 
-// ConsumeInvite marks the invite used. Call this after Signup succeeds
-// for an invited email, so the same invite link can't be reused.
 func (s *InviteService) ConsumeInvite(ctx context.Context, rawToken string) error {
 	return s.invites.MarkUsed(ctx, rawToken)
 }

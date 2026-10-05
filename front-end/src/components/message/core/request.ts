@@ -103,6 +103,10 @@ export const reqGetConversationMessages = async (conversationId: string): Promis
     );
 };
 
+export const reqMarkMessageRead = async (messageId: string): Promise<void> => {
+    await apiClient.patch(`/messages/${messageId}/read`);
+};
+
 export const reqSendMessage = async (
     data: SendMessageRequest
 ): Promise<MessageResponse> => {

@@ -17,6 +17,7 @@ interface MessageResponse {
     nonce: string,
     created_at: string;
     read_at: string | null;
+    read_by?: string[];
     attachments?: AttachmentResponse[];
 }
 

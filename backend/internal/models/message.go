@@ -29,7 +29,9 @@ type MessageResponse struct {
 	IsDeleted      bool            `json:"is_deleted"`
 	IsEdited       bool            `json:"is_edited"` // NEW
 	Attachments    []ws.Attachment `json:"attachments,omitempty"`
-	ReadAt         *time.Time      `json:"read_at"`
+	ReadAt         *time.Time      `json:"read_at,omitempty"`
+	ReadBy         []string        `json:"read_by,omitempty"`
+	Reactions      []Reaction      `json:"reactions,omitempty"`
 }
 
 type ConversationResponse struct {

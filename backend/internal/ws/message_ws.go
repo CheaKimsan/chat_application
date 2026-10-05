@@ -26,6 +26,7 @@ type Attachment struct {
 	ID         string    `json:"id"`
 	MessageID  string    `json:"message_id"`
 	Type       string    `json:"type"`
+	ObjectKey  string    `json:"object_key"`
 	URL        string    `json:"url"`
 	Filename   string    `json:"filename,omitempty"`
 	MimeType   string    `json:"mime_type,omitempty"`

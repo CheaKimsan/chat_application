@@ -8,6 +8,7 @@ import (
 	"golang-jwt-project/internal/models"
 	"golang-jwt-project/internal/ws"
 	"log"
+	"time"
 
 	"github.com/lib/pq"
 )
@@ -97,6 +98,23 @@ func (r *MessageRepository) GetConversation(ctx context.Context, callerID, other
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
+
+	if len(messages) > 0 {
+		ids := make([]string, len(messages))
+		for i, m := range messages {
+			ids[i] = m.ID
+		}
+		reactions, err := r.GetReactionsForMessages(ctx, ids)
+		if err != nil {
+			log.Println("load reactions error:", err)
+			return nil, err
+		}
+		log.Printf("GetConversation: %d msgs, %d with reactions", len(messages), len(reactions))
+		for i := range messages {
+			messages[i].Reactions = reactions[messages[i].ID]
+		}
+	}
+
 	return messages, nil
 }
 
@@ -178,18 +196,62 @@ func (r *MessageRepository) Delete(ctx context.Context, messageID, fromUser stri
 // MarkRead marks the message as read if it belongs to callerID and hasn't
 // been read yet, returning the sender's id. Returns sql.ErrNoRows (unwrapped)
 // if the message doesn't exist, isn't addressed to callerID, or is already read.
-func (r *MessageRepository) MarkRead(ctx context.Context, msgID, callerID string) (string, error) {
-	var fromUser string
+func (r *MessageRepository) MarkRead(ctx context.Context, msgID, callerID string) (string, string, time.Time, error) {
+	var fromUser, toUser, conversationID string
 	err := r.db.QueryRowContext(ctx,
-		`UPDATE messages SET read_at = now()
-			WHERE id = $1 AND to_user = $2 AND read_at IS NULL
-			RETURNING from_user`,
-		msgID, callerID,
-	).Scan(&fromUser)
+		`SELECT from_user, COALESCE(to_user, ''), COALESCE(conversation_id::text, '')
+		 FROM messages WHERE id = $1 AND deleted_at IS NULL`,
+		msgID,
+	).Scan(&fromUser, &toUser, &conversationID)
 	if err != nil {
-		return "", err
+		return "", "", time.Time{}, err
 	}
-	return fromUser, nil
+
+	if toUser != "" {
+		if toUser != callerID {
+			return "", "", time.Time{}, sql.ErrNoRows
+		}
+		var readAt time.Time
+		err = r.db.QueryRowContext(ctx,
+			`UPDATE messages SET read_at = COALESCE(read_at, now())
+			 WHERE id = $1 RETURNING read_at`, msgID,
+		).Scan(&readAt)
+		return fromUser, conversationID, readAt, err
+	}
+	if conversationID == "" {
+		return "", "", time.Time{}, sql.ErrNoRows
+	}
+
+	var isGroup bool
+	err = r.db.QueryRowContext(ctx,
+		`SELECT c.is_group
+		 FROM conversations c
+		 JOIN conversation_members cm ON cm.conversation_id = c.id
+		 WHERE c.id = $1 AND cm.user_id = $2`, conversationID, callerID,
+	).Scan(&isGroup)
+	if err != nil {
+		return "", "", time.Time{}, sql.ErrNoRows
+	}
+
+	var readAt time.Time
+	if !isGroup {
+		err = r.db.QueryRowContext(ctx,
+			`UPDATE messages SET read_at = COALESCE(read_at, now())
+			 WHERE id = $1 RETURNING read_at`, msgID,
+		).Scan(&readAt)
+	} else {
+		err = r.db.QueryRowContext(ctx, `
+			INSERT INTO message_reads (message_id, user_id)
+			SELECT $1, $2
+			WHERE EXISTS (
+				SELECT 1 FROM conversation_members
+				WHERE conversation_id = $3 AND user_id = $2
+			)
+			ON CONFLICT (message_id, user_id) DO UPDATE SET read_at = message_reads.read_at
+			RETURNING read_at`, msgID, callerID, conversationID,
+		).Scan(&readAt)
+	}
+	return fromUser, conversationID, readAt, err
 }
 
 func (r *MessageRepository) ExistsFromUser(ctx context.Context, messageID, callerID string) (bool, error) {
@@ -376,6 +438,31 @@ func (r *MessageRepository) GetByConversationID(ctx context.Context, conversatio
 
 	for i := range out {
 		out[i].Attachments = byMessage[out[i].ID]
+	}
+
+	readRows, err := r.db.QueryContext(ctx, `
+		SELECT message_id::text, user_id::text
+		FROM message_reads
+		WHERE message_id = ANY($1)
+		ORDER BY read_at`, pq.Array(ids))
+	if err != nil {
+		return nil, err
+	}
+	defer readRows.Close()
+
+	readersByMessage := make(map[string][]string)
+	for readRows.Next() {
+		var messageID, userID string
+		if err := readRows.Scan(&messageID, &userID); err != nil {
+			return nil, err
+		}
+		readersByMessage[messageID] = append(readersByMessage[messageID], userID)
+	}
+	if err := readRows.Err(); err != nil {
+		return nil, err
+	}
+	for i := range out {
+		out[i].ReadBy = readersByMessage[out[i].ID]
 	}
 
 	return out, nil

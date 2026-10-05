@@ -110,11 +110,20 @@ func (s *MessageService) Delete(ctx context.Context, fromUser, messageID string)
 // exist, isn't addressed to callerID, or is already read — callers should
 // check with errors.Is(err, sql.ErrNoRows).
 func (s *MessageService) MarkRead(ctx context.Context, callerID, msgID string) error {
-	fromUser, err := s.messages.MarkRead(ctx, msgID, callerID)
+	fromUser, conversationID, readAt, err := s.messages.MarkRead(ctx, msgID, callerID)
 	if err != nil {
 		return err
 	}
-	s.pool.SendToUser(fromUser, map[string]interface{}{"type": "message_read", "message_id": msgID, "read_by": callerID})
+	payload := map[string]interface{}{
+		"type":       "message_read",
+		"message_id": msgID,
+		"read_by":    callerID,
+		"read_at":    readAt,
+	}
+	if conversationID != "" {
+		payload["conversation_id"] = conversationID
+	}
+	s.pool.SendToUser(fromUser, payload)
 	return nil
 }
 

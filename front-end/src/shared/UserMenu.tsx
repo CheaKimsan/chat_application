@@ -26,8 +26,6 @@ export default function UserMenu({ username, email, onLogout }: UserMenuProps) {
         setProfilePhoto(user?.profile_photo ?? null);
     }, [user?.profile_photo]);
 
-    console.log(user?.profile_photo);
-
 
     const handleImageError = () => {
         console.error('Profile photo could not be loaded:', profilePhoto);

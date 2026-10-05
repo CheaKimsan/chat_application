@@ -1,7 +1,10 @@
-// --- Add to MessageService (message_service.go) ---
 package services
 
-import "context"
+import (
+	"context"
+	"golang-jwt-project/internal/models"
+	"log"
+)
 
 func (s *MessageService) AddReaction(ctx context.Context, userID, messageID, emoji string) error {
 	target, err := s.messages.AddReaction(ctx, messageID, userID, emoji)
@@ -25,46 +28,25 @@ func (s *MessageService) RemoveReaction(ctx context.Context, userID, messageID, 
 	return nil
 }
 
-// Note: excludeUserID is passed as "" here (unlike Delete/Update, which
-// exclude the actor) because reactions should notify EVERYONE including
-// the person who reacted — their own other tabs/devices need the update
-// too, and the frontend's optimistic UI update already handles the local
-// echo cheaply, so a duplicate is harmless.
+func (s *MessageService) AttachReactions(ctx context.Context, msgs []models.MessageResponse) error {
+	if len(msgs) == 0 {
+		return nil
+	}
+	ids := make([]string, len(msgs))
+	for i, m := range msgs {
+		ids[i] = m.ID
+	}
 
-// --- Add to your message handler (message_handler.go) ---
-//
-// func (h *MessageHandler) AddReaction(c *gin.Context) {
-//     callerID, _ := middleware.CallerFromContext(c)
-//     var req struct {
-//         Emoji string `json:"emoji" binding:"required"`
-//     }
-//     if err := c.ShouldBindJSON(&req); err != nil {
-//         c.JSON(http.StatusBadRequest, gin.H{"message": "emoji is required"})
-//         return
-//     }
-//     if err := h.messages.AddReaction(c.Request.Context(), callerID, c.Param("id"), req.Emoji); err != nil {
-//         log.Printf("add reaction failed: %v", err)
-//         c.JSON(http.StatusInternalServerError, gin.H{"message": "failed to add reaction"})
-//         return
-//     }
-//     c.JSON(http.StatusOK, gin.H{"message": "reaction added"})
-// }
-//
-// func (h *MessageHandler) RemoveReaction(c *gin.Context) {
-//     callerID, _ := middleware.CallerFromContext(c)
-//     emoji := c.Query("emoji")
-//     if emoji == "" {
-//         c.JSON(http.StatusBadRequest, gin.H{"message": "emoji is required"})
-//         return
-//     }
-//     if err := h.messages.RemoveReaction(c.Request.Context(), callerID, c.Param("id"), emoji); err != nil {
-//         log.Printf("remove reaction failed: %v", err)
-//         c.JSON(http.StatusInternalServerError, gin.H{"message": "failed to remove reaction"})
-//         return
-//     }
-//     c.JSON(http.StatusOK, gin.H{"message": "reaction removed"})
-// }
-//
-// Routes (wherever your other /messages/:id routes are registered):
-//   router.POST("/messages/:id/reactions", handler.AddReaction)
-//   router.DELETE("/messages/:id/reactions", handler.RemoveReaction)
+	reactions, err := s.messages.GetReactionsForMessages(ctx, ids)
+
+	if err != nil {
+		log.Printf("AttachReactions error: %v", err)
+		return err
+	}
+	log.Printf("AttachReactions: %d msgs, %d with reactions", len(msgs), len(reactions))
+
+	for i := range msgs {
+		msgs[i].Reactions = reactions[msgs[i].ID]
+	}
+	return nil
+}

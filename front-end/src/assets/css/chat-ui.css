@@ -1314,11 +1314,26 @@ button { -webkit-tap-highlight-color: transparent; }
 
 /* Timestamp + receipt */
 .message-time {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   font-size: 11px;
   color: var(--text-dim);
   margin-top: 2px;
   font-variant-numeric: tabular-nums;
   padding: 0 4px;
+}
+
+.message-receipt {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: 3px;
+  color: var(--text-dim);
+}
+
+.message-receipt--seen {
+  color: #168bd2;
 }
 
 /* Message actions menu position tweak */
