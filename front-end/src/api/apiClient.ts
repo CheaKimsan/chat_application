@@ -114,3 +114,8 @@ export const reqGetPublicKey = async (userId: string | number): Promise<string> 
 export const reqUpdateMyPublicKey = async (publicKeyB64: string): Promise<void> => {
     await apiClient.put("/users/me/public-key", { public_key: publicKeyB64 });
 };
+
+export const reqChatbotReply = async (message: string): Promise<string> => {
+    const response = await apiClient.post<{ reply: string }>("/chatbot", { message });
+    return response.data.reply;
+};

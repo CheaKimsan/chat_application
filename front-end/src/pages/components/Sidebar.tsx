@@ -4,8 +4,9 @@ import { useAuthStore } from "../../store/auth.store";
 import { useQuery } from "@tanstack/react-query";
 import { UserResponse } from "../../components/user/core/model";
 import { reqGetUsers } from "../../components/user/core/request";
-import { Contact2, Plus, Search, Users } from "lucide-react";
+import { Contact2, Plus, Search, Sparkles, Users } from "lucide-react";
 import { Conversation } from "./Layout";
+import { NavLink } from "react-router-dom";
 
 interface SidebarProps {
     onSelectContact: (u: UserResponse) => void;
@@ -145,6 +146,13 @@ export default function Sidebar({
                         aria-label="Search"
                     />
                 </label>
+                <NavLink
+                    to="/dashboard/assistant"
+                    className={({ isActive }) => `sidebar-assistant-link${isActive ? " sidebar-assistant-link--active" : ""}`}
+                >
+                    <Sparkles size={16} />
+                    <span>AI Assistant</span>
+                </NavLink>
             </div>
 
             {/* Scroll body */}

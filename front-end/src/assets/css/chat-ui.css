@@ -979,6 +979,30 @@ button { -webkit-tap-highlight-color: transparent; }
 }
 .sidebar__search input::placeholder { color: var(--text-faint); }
 
+.sidebar-assistant-link {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 42px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--text-dim);
+  text-decoration: none;
+  font-size: 13px;
+  transition: border-color var(--dur) var(--ease), color var(--dur) var(--ease), background var(--dur) var(--ease);
+}
+
+.sidebar-assistant-link svg { color: var(--accent); }
+
+.sidebar-assistant-link:hover,
+.sidebar-assistant-link--active {
+  border-color: rgba(95, 189, 178, 0.5);
+  background: var(--accent-dim);
+  color: var(--text);
+}
+
 .sidebar__body {
   flex: 1;
   overflow-y: auto;

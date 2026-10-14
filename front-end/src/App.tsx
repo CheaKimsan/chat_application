@@ -6,6 +6,7 @@ import LoginForm from "./components/auth/login/LoginForm";
 import RegisterForm from "./components/auth/register/RegisterForm";
 import ForgotPasswordForm from "./components/auth/forgot-password/ForgotPassword";
 import ResetPasswordForm from "./components/auth/forgot-password/ResetPasswordForm";
+import Chatbot from "./pages/components/Chatbot";
 
 function App() {
 
@@ -24,6 +25,7 @@ function App() {
                 }
             >
                 <Route index element={<ChatWindow />} />
+                <Route path="assistant" element={<Chatbot />} />
             </Route>
         </Routes>
     );

@@ -74,7 +74,7 @@ func (h *MessageHandler) Delete(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"message": "message not found or not owned by you"})
 			return
 		}
-		log.Printf("delete message %s failed: %v", c.Param("id"), err) // <-- this line
+		log.Printf("delete message %s failed: %v", c.Param("id"), err)
 		c.JSON(http.StatusInternalServerError, gin.H{"message": "failed to delete message"})
 		return
 	}
@@ -106,6 +106,14 @@ func (h *MessageHandler) GetConversation(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"message": "failed to fetch messages"})
 		return
 	}
+
+	// Attach read receipts so "Seen" survives a refresh in 1:1 chats.
+	if err := h.messages.AttachReads(c.Request.Context(), messages); err != nil {
+		log.Printf("attach reads failed: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"message": "failed to load read receipts"})
+		return
+	}
+
 	c.JSON(http.StatusOK, gin.H{"messages": messages})
 }
 
@@ -133,9 +141,12 @@ func (h *MessageHandler) MarkRead(c *gin.Context) {
 
 	if err := h.messages.MarkRead(c.Request.Context(), callerID, msgID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			c.JSON(http.StatusNotFound, gin.H{"message": "message not found or already read"})
+			// Already read (or nothing to update): treat as success so the
+			// frontend doesn't see a 404 and retry.
+			c.JSON(http.StatusOK, gin.H{"message": "already read"})
 			return
 		}
+		log.Printf("mark read %s failed: %v", msgID, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"message": "failed to mark as read"})
 		return
 	}
@@ -203,7 +214,6 @@ func (h *MessageHandler) Upload(c *gin.Context) {
 		// Every file succeeded.
 		c.JSON(http.StatusCreated, gin.H{"message": "files uploaded successfully", "attachments": saved})
 	default:
-		// Partial success — 201 kept since some data was created; check "errors" for the rest.
 		c.JSON(http.StatusCreated, gin.H{
 			"message":     "some files uploaded successfully",
 			"attachments": saved,
@@ -228,10 +238,17 @@ func (h *MessageHandler) GetConversationByID(c *gin.Context) {
 		return
 	}
 
-	// NEW: attach reactions so they survive a refresh in group chats
+	// Attach reactions so they survive a refresh in group chats.
 	if err := h.messages.AttachReactions(c.Request.Context(), messages); err != nil {
 		log.Printf("attach reactions failed: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"message": "failed to load reactions"})
+		return
+	}
+
+	// Attach read receipts so "Seen by N" survives a refresh.
+	if err := h.messages.AttachReads(c.Request.Context(), messages); err != nil {
+		log.Printf("attach reads failed: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"message": "failed to load read receipts"})
 		return
 	}
 

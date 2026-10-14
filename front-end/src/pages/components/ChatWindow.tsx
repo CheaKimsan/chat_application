@@ -53,6 +53,38 @@ const parseTimestamp = (value: string | number | Date) => {
     return parsed;
 };
 
+const normalizeReadBy = (value: unknown): string[] => {
+    if (Array.isArray(value)) {
+        return value.map((v) => String(v)).filter(Boolean);
+    }
+    if (value == null || value === "") {
+        return [];
+    }
+    if (typeof value === "string") {
+        return value
+            .split(",")
+            .map((v) => v.trim())
+            .filter(Boolean);
+    }
+    return [String(value)];
+};
+
+const isMessageSeenForChat = (
+    message: Partial<ChatMessage>,
+    isGroupChat: boolean,
+    contactUserId?: string
+) => {
+    const readers = normalizeReadBy(message.read_by);
+
+    if (isGroupChat) {
+        return readers.length > 0;
+    }
+
+    if (message.read_at) return true;
+    if (contactUserId) return readers.includes(String(contactUserId));
+    return false;
+};
+
 const extractTimeOnly = (value: string) => {
     const match = value.match(/T(\d{2}):(\d{2})/);
     return match ? `${match[1]}:${match[2]}` : "";
@@ -101,7 +133,8 @@ export default function ChatWindow() {
 
     const conversationId = selectedConversation?.id;
     const contactId = selectedContact?.id;
-    const activeId = conversationId ?? (contactId !== undefined ? String(contactId) : undefined);
+    const contactIdStr = contactId !== undefined ? String(contactId) : undefined;
+    const activeId = conversationId ?? contactIdStr;
     const isGroup = !!conversationId;
 
     const getSenderInfo = (fromUserId: string): SenderInfo => {
@@ -191,7 +224,6 @@ export default function ChatWindow() {
 
     useEffect(() => {
         if (!activeId) return;
-
         const handleUpdated = (event: Event) => {
             const updated = (event as CustomEvent<ChatMessage & { plaintext?: string | null; decryptError?: string }>).detail;
             queryClient.setQueryData<ChatMessage[]>(messagesQueryKey, (prev = []) =>
@@ -301,51 +333,106 @@ export default function ChatWindow() {
         setIsContactTyping(false);
     }, [activeId]);
 
+    // Mark incoming messages as read.
+    // The ref acts as a guard: once an id has been requested it is only removed
+    // again on transient failures (network error / 5xx), so a 404 or 429 can
+    // never cause an endless retry loop.
     useEffect(() => {
         if (!activeId || !user?.id || messages.length === 0) return;
 
-        const unreadMessages = messages.filter(
-            (message) => String(message.from_user) !== String(user.id)
-                && (isGroup
-                    ? !message.read_by?.some((readerId) => String(readerId) === String(user.id))
-                    : String(message.from_user) === String(contactId) && !message.read_at)
-                && !readReceiptRequestsRef.current.has(message.id)
-        );
+        const unreadMessages = messages.filter((message) => {
+            if (String(message.from_user) === String(user.id)) return false;
+            if (readReceiptRequestsRef.current.has(message.id)) return false;
+
+            const readers = normalizeReadBy(message.read_by);
+
+            if (isGroup) {
+                return !readers.includes(String(user.id));
+            }
+
+            return !isMessageSeenForChat(message, false, contactIdStr);
+        });
+
         unreadMessages.forEach((message) => {
             readReceiptRequestsRef.current.add(message.id);
-            void reqMarkMessageRead(message.id).catch((error) => {
-                readReceiptRequestsRef.current.delete(message.id);
-                console.error("Failed to mark message as seen:", error);
-            });
+
+            void reqMarkMessageRead(message.id)
+                .then(() => {
+                    queryClient.setQueryData<ChatMessage[]>(messagesQueryKey, (prev = []) =>
+                        prev.map((msg) => {
+                            if (String(msg.id) !== String(message.id)) return msg;
+
+                            const nextReaders = Array.from(
+                                new Set([...normalizeReadBy(msg.read_by), String(user.id)])
+                            );
+
+                            return {
+                                ...msg,
+                                read_by: nextReaders,
+                                read_at: msg.read_at ?? new Date().toISOString(),
+                            };
+                        })
+                    );
+                })
+                .catch((error) => {
+                    const status = error?.response?.status;
+                    // Allow a retry only for network errors or 5xx responses.
+                    if (!status || status >= 500) {
+                        readReceiptRequestsRef.current.delete(message.id);
+                    }
+                    console.error("Failed to mark message as seen:", error);
+                });
         });
-    }, [activeId, contactId, conversationId, isGroup, messages, user?.id]);
+    }, [activeId, contactIdStr, conversationId, isGroup, messages, user?.id, queryClient]);
 
     useEffect(() => {
         if (!activeId) return;
 
         const handleMessageRead = (event: Event) => {
-            const { message_id, read_by, read_at, conversation_id } = (event as CustomEvent<{
+            const detail = (event as CustomEvent<{
                 message_id: string;
-                read_by: string;
-                read_at: string;
+                read_by?: string | string[] | null;
+                read_at?: string | null;
                 conversation_id?: string;
             }>).detail;
 
+            if (!detail?.message_id) return;
+
+            const readers = normalizeReadBy(detail.read_by);
+
             if (isGroup) {
-                if (String(conversation_id) !== String(conversationId)) return;
-                queryClient.setQueryData<ChatMessage[]>(["messages", "conv", conversationId], (prev = []) =>
-                    prev.map((message) => String(message.id) === String(message_id)
-                        ? { ...message, read_by: Array.from(new Set([...(message.read_by ?? []), String(read_by)])) }
-                        : message)
+                if (detail.conversation_id && String(detail.conversation_id) !== String(conversationId)) return;
+
+                queryClient.setQueryData<ChatMessage[]>(messagesQueryKey, (prev = []) =>
+                    prev.map((message) => {
+                        if (String(message.id) !== String(detail.message_id)) return message;
+
+                        return {
+                            ...message,
+                            read_by: Array.from(
+                                new Set([...normalizeReadBy(message.read_by), ...readers].map(String))
+                            ),
+                            read_at: message.read_at ?? detail.read_at ?? null,
+                        };
+                    })
                 );
                 return;
             }
-            if (String(read_by) !== String(contactId)) return;
 
-            queryClient.setQueryData<ChatMessage[]>(["messages", contactId], (prev = []) =>
-                prev.map((m) =>
-                    String(m.id) === String(message_id) ? { ...m, read_at } : m
-                )
+            if (readers.length > 0 && !readers.includes(String(contactId ?? ""))) return;
+
+            queryClient.setQueryData<ChatMessage[]>(messagesQueryKey, (prev = []) =>
+                prev.map((m) => {
+                    if (String(m.id) !== String(detail.message_id)) return m;
+
+                    return {
+                        ...m,
+                        read_at: detail.read_at ?? m.read_at ?? null,
+                        read_by: Array.from(
+                            new Set([...normalizeReadBy(m.read_by), ...readers].map(String))
+                        ),
+                    };
+                })
             );
         };
 
@@ -514,7 +601,10 @@ export default function ChatWindow() {
         return date.toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" });
     };
 
-    const lastSelfIndex = [...orderedMessages].reverse().findIndex((m) => String(m.from_user) === String(user?.id));
+    const lastSelfIndex = [...orderedMessages]
+        .reverse()
+        .findIndex((m) => String(m.from_user) === String(user?.id) && !m.deleted);
+
     const lastSelfMessageId =
         lastSelfIndex === -1 ? null : orderedMessages[orderedMessages.length - 1 - lastSelfIndex].id;
 
@@ -569,12 +659,13 @@ export default function ChatWindow() {
 
                 const m = item.message as ChatMessage;
                 const isSelf = String(m.from_user) === String(user?.id);
-                const showReceipt = isSelf && m.id === lastSelfMessageId;
-                const seenByCount = m.read_by?.length ?? 0;
-                const isSeen = isGroup ? seenByCount > 0 : !!m.read_at;
-                const attachments = m.attachments ?? [];
                 const isEditing = editingMessageId === m.id;
                 const canEdit = isSelf && !conversationId && !m.deleted;
+                const attachments = m.attachments ?? [];
+                const showReceipt = isSelf && m.id === lastSelfMessageId;
+                const seenByIds = normalizeReadBy(m.read_by);
+                const seenByCount = seenByIds.length;
+                const isSeen = isMessageSeenForChat(m, isGroup, contactIdStr);
 
                 const previousItem = index > 0 ? timeline[index - 1] : null;
                 const previousFromSameSender =
@@ -803,7 +894,9 @@ export default function ChatWindow() {
                                     {showReceipt && (
                                         <span className={`message-receipt${isSeen ? " message-receipt--seen" : ""}`}>
                                             {isSeen ? <CheckCheck size={14} /> : <Check size={14} />}
-                                            {isGroup ? (seenByCount > 0 ? `Seen by ${seenByCount}` : "Delivered") : (isSeen ? "Seen" : "Delivered")}
+                                            {isGroup
+                                                ? (seenByCount > 0 ? `Seen by ${seenByCount}` : "Delivered")
+                                                : (isSeen ? "Seen" : "Delivered")}
                                         </span>
                                     )}
                                 </span>
@@ -864,4 +957,4 @@ export default function ChatWindow() {
             <div ref={bottomRef} />
         </div>
     );
-}   
+}

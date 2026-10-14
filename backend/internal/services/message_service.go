@@ -171,3 +171,30 @@ func (s *MessageService) broadcastToConversation(ctx context.Context, conversati
 func (s *MessageService) ListConversations(ctx context.Context, callerID string) ([]models.ConversationResponse, error) {
 	return s.messages.ListConversationsForUser(ctx, callerID)
 }
+
+// AttachReads fills ReadBy on every message from the message_reads table,
+// so read receipts survive a page refresh. Used by both the 1:1 and the
+// conversation-by-id handlers.
+func (s *MessageService) AttachReads(ctx context.Context, msgs []models.MessageResponse) error {
+	if len(msgs) == 0 {
+		return nil
+	}
+
+	ids := make([]string, 0, len(msgs))
+	for _, m := range msgs {
+		ids = append(ids, m.ID)
+	}
+
+	readers, err := s.messages.GetReadersByMessageIDs(ctx, ids)
+	if err != nil {
+		return err
+	}
+
+	for i := range msgs {
+		msgs[i].ReadBy = readers[msgs[i].ID]
+		if msgs[i].ReadBy == nil {
+			msgs[i].ReadBy = []string{}
+		}
+	}
+	return nil
+}

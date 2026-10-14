@@ -8,6 +8,7 @@ import (
 	"golang-jwt-project/internal/models"
 	"golang-jwt-project/internal/ws"
 	"log"
+	"strconv"
 	"time"
 
 	"github.com/lib/pq"
@@ -193,65 +194,96 @@ func (r *MessageRepository) Delete(ctx context.Context, messageID, fromUser stri
 	return broadcastTarget, nil
 }
 
-// MarkRead marks the message as read if it belongs to callerID and hasn't
-// been read yet, returning the sender's id. Returns sql.ErrNoRows (unwrapped)
-// if the message doesn't exist, isn't addressed to callerID, or is already read.
 func (r *MessageRepository) MarkRead(ctx context.Context, msgID, callerID string) (string, string, time.Time, error) {
-	var fromUser, toUser, conversationID string
-	err := r.db.QueryRowContext(ctx,
-		`SELECT from_user, COALESCE(to_user, ''), COALESCE(conversation_id::text, '')
-		 FROM messages WHERE id = $1 AND deleted_at IS NULL`,
-		msgID,
-	).Scan(&fromUser, &toUser, &conversationID)
+	msgInt, err := strconv.ParseInt(msgID, 10, 64)
 	if err != nil {
-		return "", "", time.Time{}, err
-	}
-
-	if toUser != "" {
-		if toUser != callerID {
-			return "", "", time.Time{}, sql.ErrNoRows
-		}
-		var readAt time.Time
-		err = r.db.QueryRowContext(ctx,
-			`UPDATE messages SET read_at = COALESCE(read_at, now())
-			 WHERE id = $1 RETURNING read_at`, msgID,
-		).Scan(&readAt)
-		return fromUser, conversationID, readAt, err
-	}
-	if conversationID == "" {
 		return "", "", time.Time{}, sql.ErrNoRows
 	}
 
-	var isGroup bool
-	err = r.db.QueryRowContext(ctx,
-		`SELECT c.is_group
-		 FROM conversations c
-		 JOIN conversation_members cm ON cm.conversation_id = c.id
-		 WHERE c.id = $1 AND cm.user_id = $2`, conversationID, callerID,
-	).Scan(&isGroup)
+	callerInt, err := strconv.ParseInt(callerID, 10, 64)
 	if err != nil {
+		return "", "", time.Time{}, sql.ErrNoRows
+	}
+
+	var fromUser, toUser sql.NullInt64
+	var conversationID sql.NullString
+
+	err = r.db.QueryRowContext(ctx,
+		`SELECT from_user, to_user, conversation_id
+         FROM messages
+         WHERE id = $1 AND deleted_at IS NULL`,
+		msgInt,
+	).Scan(&fromUser, &toUser, &conversationID)
+
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", "", time.Time{}, sql.ErrNoRows
+		}
+		return "", "", time.Time{}, err
+	}
+
+	// 1:1 message
+	if toUser.Valid && toUser.Int64 != 0 {
+		if toUser.Int64 != callerInt {
+			return "", "", time.Time{}, sql.ErrNoRows
+		}
+
+		var readAt time.Time
+		if err := r.db.QueryRowContext(ctx,
+			`UPDATE messages
+             SET read_at = COALESCE(read_at, now())
+             WHERE id = $1
+             RETURNING read_at`,
+			msgInt,
+		).Scan(&readAt); err != nil {
+			return "", "", time.Time{}, err
+		}
+
+		if fromUser.Valid {
+			return strconv.FormatInt(fromUser.Int64, 10), conversationID.String, readAt, nil
+		}
+		return "", conversationID.String, readAt, nil
+	}
+
+	// group/conversation message
+	if !conversationID.Valid || conversationID.String == "" {
+		return "", "", time.Time{}, sql.ErrNoRows
+	}
+
+	var allowed bool
+	err = r.db.QueryRowContext(ctx,
+		`SELECT EXISTS (
+            SELECT 1
+            FROM conversation_members
+            WHERE conversation_id = $1 AND user_id = $2
+        )`,
+		conversationID.String, callerInt,
+	).Scan(&allowed)
+
+	if err != nil {
+		return "", "", time.Time{}, err
+	}
+	if !allowed {
 		return "", "", time.Time{}, sql.ErrNoRows
 	}
 
 	var readAt time.Time
-	if !isGroup {
-		err = r.db.QueryRowContext(ctx,
-			`UPDATE messages SET read_at = COALESCE(read_at, now())
-			 WHERE id = $1 RETURNING read_at`, msgID,
-		).Scan(&readAt)
-	} else {
-		err = r.db.QueryRowContext(ctx, `
-			INSERT INTO message_reads (message_id, user_id)
-			SELECT $1, $2
-			WHERE EXISTS (
-				SELECT 1 FROM conversation_members
-				WHERE conversation_id = $3 AND user_id = $2
-			)
-			ON CONFLICT (message_id, user_id) DO UPDATE SET read_at = message_reads.read_at
-			RETURNING read_at`, msgID, callerID, conversationID,
-		).Scan(&readAt)
+	err = r.db.QueryRowContext(ctx, `
+        INSERT INTO message_reads (message_id, user_id, read_at)
+        VALUES ($1, $2, now())
+        ON CONFLICT (message_id, user_id)
+        DO UPDATE SET read_at = now()
+        RETURNING read_at
+    `, msgInt, callerInt).Scan(&readAt)
+
+	if err != nil {
+		return "", "", time.Time{}, err
 	}
-	return fromUser, conversationID, readAt, err
+
+	if fromUser.Valid {
+		return strconv.FormatInt(fromUser.Int64, 10), conversationID.String, readAt, nil
+	}
+	return "", conversationID.String, readAt, nil
 }
 
 func (r *MessageRepository) ExistsFromUser(ctx context.Context, messageID, callerID string) (bool, error) {
@@ -512,4 +544,29 @@ func (r *MessageRepository) ListConversationsForUser(ctx context.Context, userID
 	}
 
 	return out, nil
+}
+func (r *MessageRepository) GetReadersByMessageIDs(ctx context.Context, ids []string) (map[string][]string, error) {
+	out := make(map[string][]string, len(ids))
+	if len(ids) == 0 {
+		return out, nil
+	}
+
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT message_id::text, user_id::text
+		   FROM message_reads
+		  WHERE message_id::text = ANY($1)`,
+		pq.Array(ids))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var mid, uid string
+		if err := rows.Scan(&mid, &uid); err != nil {
+			return nil, err
+		}
+		out[mid] = append(out[mid], uid)
+	}
+	return out, rows.Err()
 }

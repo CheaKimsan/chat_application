@@ -112,6 +112,7 @@ func NewRouter(db *sql.DB, pool *ws.Pool, jwtSecret []byte, refreshSecret []byte
 	messageService := services.NewMessageService(messageRepo, pool)
 	uploadService := services.NewUploadService(attachmentRepo, minioStore)
 	messageHandler := handlers.NewMessageHandler(messageService, uploadService, pool)
+	chatbotHandler := handlers.NewChatbotHandler(os.Getenv("GEMINI_API_KEY"), os.Getenv("GEMINI_MODEL"))
 
 	router.GET("/image/:userId/:messageId/:file", handleImage())
 
@@ -135,6 +136,10 @@ func NewRouter(db *sql.DB, pool *ws.Pool, jwtSecret []byte, refreshSecret []byte
 		groups := api.Group("/groups")
 		groups.Use(middleware.AuthMiddleware(jwtSecret))
 		groups.GET("/:groupId/call-history", callHistoryHandler.ListByGroup)
+
+		chatbot := api.Group("/chatbot")
+		chatbot.Use(middleware.AuthMiddleware(jwtSecret))
+		chatbot.POST("", chatbotHandler.Generate)
 
 		// GET /invites/validate is public — the invitee isn't logged in
 		// yet when checking their invite link on the signup page.

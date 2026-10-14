@@ -11,3 +11,4 @@ ENV/
 .env
 .env.*
 
+backend/.env

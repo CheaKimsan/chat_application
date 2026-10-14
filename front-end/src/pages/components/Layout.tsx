@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Outlet, useNavigate } from 'react-router-dom';
+import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import ChatHeader from './Header';
 import { useAuthStore } from '../../store/auth.store';
 import Sidebar from './Sidebar';
@@ -39,6 +39,8 @@ export default function Layout() {
 
     const clearUser = useAuthStore((s) => s.clearUser);
     const navigate = useNavigate();
+    const location = useLocation();
+    const isAssistantView = location.pathname === '/dashboard/assistant';
 
     useEffect(() => {
         if (!token) return;
@@ -469,12 +471,14 @@ export default function Layout() {
         stopTyping();
         setSelectedGroup(undefined);
         setSelectedContact(u);
+        navigate('/dashboard');
     };
 
     const handleSelectGroup = (group: Conversation) => {
         stopTyping();
         setSelectedContact(undefined);
         setSelectedGroup(group);
+        navigate('/dashboard');
     };
 
     const handleCreateGroup = async (name: string, memberIds: string[]) => {
@@ -511,10 +515,10 @@ export default function Layout() {
                 />
             )}
 
-            <main className="layout-main">
-                {(selectedContact || selectedGroup) && <ChatHeader contact={contact} isTyping={isTyping} />}
-                {selectedContact && <CallPanel contactId={selectedContact.id} />}
-                {selectedGroup && (
+            <main className={`layout-main${isAssistantView ? ' layout-main--assistant' : ''}`}>
+                {!isAssistantView && (selectedContact || selectedGroup) && <ChatHeader contact={contact} isTyping={isTyping} />}
+                {!isAssistantView && selectedContact && <CallPanel contactId={selectedContact.id} />}
+                {!isAssistantView && selectedGroup && (
                     <GroupCallPanel
                         conversationId={selectedGroup.id}
                         members={selectedGroup.members
@@ -533,7 +537,7 @@ export default function Layout() {
                     {user && <UserMenu username={user.username} email={user.email} onLogout={handleLogout} />}
                 </div>
                 <div className="layout-content">
-                    <div className="layout-scroll">
+                    <div className={`layout-scroll${isAssistantView ? ' layout-scroll--assistant' : ''}`}>
                         <Outlet context={{
                             outletInput,
                             setOutletInput,
@@ -547,7 +551,7 @@ export default function Layout() {
                         }} />
                     </div>
 
-                    {(selectedContact || selectedGroup) && (
+                    {!isAssistantView && (selectedContact || selectedGroup) && (
                         <form
                             onSubmit={(e) => {
                                 e.preventDefault();
