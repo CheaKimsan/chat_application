@@ -10,8 +10,10 @@ import (
 	"strings"
 	"time"
 
+	"golang-jwt-project/internal/bots"
 	"golang-jwt-project/internal/handlers"
 	"golang-jwt-project/internal/middleware"
+	"golang-jwt-project/internal/notify"
 	"golang-jwt-project/internal/repository"
 	"golang-jwt-project/internal/services"
 	"golang-jwt-project/internal/storage"
@@ -44,7 +46,7 @@ func handleImage() gin.HandlerFunc {
 	}
 }
 
-func NewRouter(db *sql.DB, pool *ws.Pool, jwtSecret []byte, refreshSecret []byte, globalLimiter, authLimiter *middleware.RateLimiter) *gin.Engine {
+func NewRouter(db *sql.DB, pool *ws.Pool, jwtSecret []byte, refreshSecret []byte, globalLimiter, authLimiter *middleware.RateLimiter, loginLinks handlers.LoginLinkConsumer) *gin.Engine {
 	router := gin.Default()
 
 	uploadsDir, err := filepath.Abs(filepath.Join("..", "..", "uploads"))
@@ -54,7 +56,13 @@ func NewRouter(db *sql.DB, pool *ws.Pool, jwtSecret []byte, refreshSecret []byte
 
 	corsConfig := cors.DefaultConfig()
 	corsConfig.AllowOriginFunc = func(origin string) bool {
-		return strings.HasPrefix(origin, "http://localhost:3000") || strings.HasPrefix(origin, "http://127.0.0.1:3000") || strings.HasPrefix(origin, "http://192.168.") || strings.HasPrefix(origin, "http://10.") || strings.HasPrefix(origin, "http://172.")
+		return strings.HasPrefix(
+			origin,
+			"http://localhost:3000") ||
+			strings.HasPrefix(origin, "http://127.0.0.1:3000") ||
+			strings.HasPrefix(origin, "http://192.168.") ||
+			strings.HasPrefix(origin, "http://10.") ||
+			strings.HasPrefix(origin, "http://172.")
 	}
 	corsConfig.AllowHeaders = []string{"Origin", "Content-Length", "Content-Type", "Authorization"}
 	corsConfig.AllowMethods = []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"}
@@ -67,7 +75,6 @@ func NewRouter(db *sql.DB, pool *ws.Pool, jwtSecret []byte, refreshSecret []byte
 		log.Fatal("invalid AES key: must be base64-encoded 32 bytes")
 	}
 
-	// --- auth wiring: repositories -> services -> handlers ---
 	userRepo := repository.NewUserRepository(db)
 	refreshRepo := repository.NewRefreshTokenRepository(db)
 	passwordResetRepo := repository.NewPasswordResetRepository(db)
@@ -100,7 +107,21 @@ func NewRouter(db *sql.DB, pool *ws.Pool, jwtSecret []byte, refreshSecret []byte
 	inviteService := services.NewInviteService(userRepo, inviteRepo, smtpFrom, smtpAppPassword, smtpHost, smtpPort)
 	inviteHandler := handlers.NewInviteHandler(inviteService)
 
-	authHandler := handlers.NewAuthHandler(authService, inviteService)
+	// --- Telegram login-alert wiring ---
+	telegramNotifier := notify.NewTelegram(os.Getenv("TELEGRAM_BOT_TOKEN"), os.Getenv("TELEGRAM_CHAT_ID"))
+	if !telegramNotifier.Enabled() {
+		log.Println("warning: TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID not set — login alerts to Telegram are disabled")
+	}
+
+	// --- in-app bot wiring ---
+	botRegistry := bots.NewRegistry()
+	id := os.Getenv("HELPER_BOT_USER_ID")
+	log.Printf("bots: HELPER_BOT_USER_ID=%q", id)
+	if id != "" {
+		botRegistry.Add(bots.NewHelperBot(id))
+	}
+
+	authHandler := handlers.NewAuthHandler(authService, inviteService, telegramNotifier)
 
 	userService := services.NewUserService(userRepo, minioStore)
 	userHandler := handlers.NewUserHandler(userService)
@@ -110,6 +131,7 @@ func NewRouter(db *sql.DB, pool *ws.Pool, jwtSecret []byte, refreshSecret []byte
 	callHistoryRepo := repository.NewCallHistoryRepository(db)
 	callHistoryHandler := handlers.NewCallHistoryHandler(callHistoryRepo)
 	messageService := services.NewMessageService(messageRepo, pool)
+	messageService.SetBots(botRegistry)
 	uploadService := services.NewUploadService(attachmentRepo, minioStore)
 	messageHandler := handlers.NewMessageHandler(messageService, uploadService, pool)
 	chatbotHandler := handlers.NewChatbotHandler(os.Getenv("GEMINI_API_KEY"), os.Getenv("GEMINI_MODEL"))
@@ -119,6 +141,7 @@ func NewRouter(db *sql.DB, pool *ws.Pool, jwtSecret []byte, refreshSecret []byte
 	api := router.Group("/api/v1")
 	{
 		authHandler.RegisterRoutes(api, authLimiter)
+		authHandler.SetTelegramLoginLinks(loginLinks)
 
 		users := api.Group("/users")
 		users.Use(middleware.AuthMiddleware(jwtSecret))
@@ -141,16 +164,11 @@ func NewRouter(db *sql.DB, pool *ws.Pool, jwtSecret []byte, refreshSecret []byte
 		chatbot.Use(middleware.AuthMiddleware(jwtSecret))
 		chatbot.POST("", chatbotHandler.Generate)
 
-		// GET /invites/validate is public — the invitee isn't logged in
-		// yet when checking their invite link on the signup page.
 		api.GET("/invites/validate", inviteHandler.ValidateInvite)
-
-		// POST /invites requires auth — any logged-in user can send one.
 		invites := api.Group("/invites")
 		invites.Use(middleware.AuthMiddleware(jwtSecret))
 		invites.POST("", inviteHandler.SendInvite)
 	}
-
 	return router
 }
 

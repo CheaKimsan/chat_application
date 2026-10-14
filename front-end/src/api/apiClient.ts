@@ -1,6 +1,7 @@
 import axios, { AxiosError, AxiosRequestConfig } from "axios";
+import { getApiBaseUrl } from "../config/runtime";
 
-const BASE_URL = `${window.location.protocol}//${window.location.hostname}:8000/api/v1`;
+const BASE_URL = getApiBaseUrl();
 
 let refreshPromise: Promise<string> | null = null;
 
@@ -107,8 +108,15 @@ apiClient.interceptors.response.use(
 );
 
 export const reqGetPublicKey = async (userId: string | number): Promise<string> => {
-    const response = await apiClient.get<PublicKeyResponse>(`/users/${userId}/public-key`);
-    return response.data.public_key;
+    try {
+        const response = await apiClient.get<PublicKeyResponse>(`/users/${userId}/public-key`);
+        return response.data.public_key || "";
+    } catch (error) {
+        if (axios.isAxiosError(error) && error.response?.status === 404) {
+            return "";
+        }
+        throw error;
+    }
 };
 
 export const reqUpdateMyPublicKey = async (publicKeyB64: string): Promise<void> => {

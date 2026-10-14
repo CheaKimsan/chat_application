@@ -343,3 +343,24 @@ func (s *AuthService) Revoke(ctx context.Context, userID string, sessionID int) 
 func (s *AuthService) LogoutAll(ctx context.Context, userID string) error {
 	return s.refreshTokens.RevokeAllForUser(ctx, userID)
 }
+
+func (s *AuthService) LoginAsUser(ctx context.Context, userID string) (models.UserResponse, TokenPair, error) {
+	u, err := s.users.GetByID(ctx, userID)
+	if err != nil {
+		return models.UserResponse{}, TokenPair{}, err
+	}
+	if u == nil {
+		return models.UserResponse{}, TokenPair{}, utils.ErrUserNotFound
+	}
+
+	// Same email-verification rule as Login.
+	if verified, ok := s.verifiedUsers[u.Email]; ok && !verified {
+		return models.UserResponse{}, TokenPair{}, ErrEmailNotVerified
+	}
+
+	pair, err := s.issueTokenPair(ctx, *u)
+	if err != nil {
+		return models.UserResponse{}, TokenPair{}, err
+	}
+	return *u, pair, nil
+}

@@ -102,6 +102,9 @@ export const waitForSharedKey = async (
     // us before, since they published their key once at login/signup time.
     try {
         const serverPubKey = await reqGetPublicKey(otherUserId);
+        if (!serverPubKey) {
+            throw new Error("peer has no public key yet");
+        }
         const theirPublicKey = await importPublicKeyFromBase64(serverPubKey);
         const sharedKey = await deriveSharedAesKey(myKeyPair.privateKey, theirPublicKey);
         sharedKeys.set(otherUserId, sharedKey);

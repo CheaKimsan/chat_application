@@ -1,6 +1,7 @@
 import { decryptMessage, encryptMessage } from "./crypto";
 import { buildKeyExchangeResponse, clearAllSharedKeys, completeKeyExchange, failKeyExchange, initE2EE, waitForSharedKey } from "./keyExchange";
 import { getAccessToken, refreshAccessToken } from "../api/apiClient";
+import { buildWebSocketUrl } from "../config/runtime";
 
 let socket: WebSocket | null = null;
 let manualDisconnect = false;
@@ -52,8 +53,7 @@ export const connectSocket = async (token?: string) => {
 
     const freshToken = await ensureValidAccessToken(token);
 
-    const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-    socket = new WebSocket(`${protocol}://${window.location.hostname}:8000/api/v1/messages?token=${freshToken}`);
+    socket = new WebSocket(buildWebSocketUrl("/messages", freshToken));
 
     socket.onopen = () => console.log("socket connected");
 

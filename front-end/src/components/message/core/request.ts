@@ -139,19 +139,29 @@ export const reqSendMessage = async (
     }
 
     // Legacy 1:1 path, encrypted.
-    const sharedKey = await waitForSharedKey(toUser, () =>
-        sendKeyExchangeRequest(toUser)
-    );
-    const { ciphertext, nonce } = await encryptMessage(sharedKey, data.body ?? "");
+    try {
+        const sharedKey = await waitForSharedKey(toUser, () =>
+            sendKeyExchangeRequest(toUser)
+        );
+        const { ciphertext, nonce } = await encryptMessage(sharedKey, data.body ?? "");
 
-    const response = await apiClient.post<{ message?: MessageResponse; data?: MessageResponse }>(
-        "/messages/send",
-        { to_user: toUser, ciphertext, nonce }
-    );
+        const response = await apiClient.post<{ message?: MessageResponse; data?: MessageResponse }>(
+            "/messages/send",
+            { to_user: toUser, ciphertext, nonce }
+        );
 
-    const msg = response.data.message ?? response.data.data ?? (response.data as unknown as MessageResponse);
+        const msg = response.data.message ?? response.data.data ?? (response.data as unknown as MessageResponse);
+        return { ...msg, body: data.body ?? "" };
+    } catch (err) {
+        console.warn("No peer public key available yet; sending plaintext fallback for this message.", err);
+        const response = await apiClient.post<{ message?: MessageResponse; data?: MessageResponse }>(
+            "/messages/send",
+            { to_user: toUser, ciphertext: data.body ?? "", nonce: null }
+        );
 
-    return { ...msg, body: data.body ?? "" };
+        const msg = response.data.message ?? response.data.data ?? (response.data as unknown as MessageResponse);
+        return { ...msg, body: data.body ?? "" };
+    }
 };
 
 export const reqUploadFile = async (

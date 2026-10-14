@@ -3,10 +3,13 @@ package handlers
 import (
 	"context"
 	"errors"
+	"fmt"
 	"golang-jwt-project/internal/middleware"
+	"golang-jwt-project/internal/notify"
 	"golang-jwt-project/internal/utils"
 	"log"
 	"net/http"
+	"time"
 
 	"golang-jwt-project/internal/models"
 	"golang-jwt-project/internal/services"
@@ -14,20 +17,15 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// CHANGED: service/inviteService are now interfaces (AuthServicer /
-// InviteServicer, defined in auth_interfaces.go) instead of concrete
-// *services.AuthService / *services.InviteService pointers. This is the
-// only change from your original file — everything below is identical.
-// *services.AuthService and *services.InviteService already implement
-// these interfaces, so NewAuthHandler(...) call sites elsewhere in your
-// app don't need to change at all.
 type AuthHandler struct {
 	service       AuthServicer
 	inviteService InviteServicer
+	telegram      *notify.Telegram
+	telegramLinks LoginLinkConsumer // NEW
 }
 
-func NewAuthHandler(service AuthServicer, inviteService InviteServicer) *AuthHandler {
-	return &AuthHandler{service: service, inviteService: inviteService}
+func NewAuthHandler(service AuthServicer, inviteService InviteServicer, telegram *notify.Telegram) *AuthHandler {
+	return &AuthHandler{service: service, inviteService: inviteService, telegram: telegram}
 }
 
 // RegisterRoutes wires up the auth routes
@@ -40,6 +38,7 @@ func (h *AuthHandler) RegisterRoutes(router *gin.RouterGroup, authLimiter *middl
 	router.POST("/logout", h.Logout)
 	router.POST("/forgot-password", authLimiter.Middleware(), h.ForgotPassword)
 	router.POST("/reset-password", authLimiter.Middleware(), h.ResetPassword)
+	router.POST("/telegram-login", authLimiter.Middleware(), h.TelegramLogin)
 }
 
 func (h *AuthHandler) Login(c *gin.Context) {
@@ -69,6 +68,11 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		user.ID, pair.RefreshToken,
 		c.Request.UserAgent(), c.ClientIP(), user.Email,
 	)
+
+	h.telegram.SendAsync(fmt.Sprintf(
+		"✅ Login success\nUser: %s (%s)\nIP: %s\nUser-Agent: %s\nTime: %s",
+		user.Username, user.Email, c.ClientIP(), c.Request.UserAgent(), time.Now().Format(time.RFC3339),
+	))
 
 	c.JSON(http.StatusOK, gin.H{
 		"status":        "login success",

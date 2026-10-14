@@ -3,7 +3,9 @@ package services
 import (
 	"context"
 	"errors"
+	"log"
 
+	"golang-jwt-project/internal/bots"
 	"golang-jwt-project/internal/models"
 	"golang-jwt-project/internal/repository"
 	"golang-jwt-project/internal/ws"
@@ -12,6 +14,8 @@ import (
 type MessageService struct {
 	messages *repository.MessageRepository
 	pool     *ws.Pool
+	bots     *bots.Registry // NEW
+
 }
 
 var ErrNotConversationMember = errors.New("caller is not a member of this conversation")
@@ -54,6 +58,7 @@ func (s *MessageService) CreateGroup(ctx context.Context, callerID, name string,
 // as a 2-person conversation). The message is broadcast to every other
 // member of the resulting conversation.
 func (s *MessageService) Send(ctx context.Context, fromUser string, req models.SendMessageRequest) (models.MessageResponse, error) {
+	log.Printf("bot: Send() entered from=%s", fromUser)
 	var conversationID string
 
 	switch {
@@ -84,6 +89,17 @@ func (s *MessageService) Send(ctx context.Context, fromUser string, req models.S
 	}
 
 	s.broadcastToConversation(ctx, conversationID, fromUser, map[string]interface{}{"type": "new_message", "message": msg})
+
+	log.Printf("bot: hook bots=%v bodyPresent=%v", s.bots != nil, req.Body != nil)
+	if s.bots != nil && req.Body != nil {
+		go s.maybeBotReply(conversationID, fromUser, *req.Body)
+	}
+
+	if s.bots != nil {
+		if text, ok := botText(req); ok {
+			go s.maybeBotReply(conversationID, fromUser, text)
+		}
+	}
 	return msg, nil
 }
 

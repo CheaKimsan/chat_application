@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import ChatHeader from './Header';
 import { useAuthStore } from '../../store/auth.store';
@@ -209,6 +209,16 @@ export default function Layout() {
 
 
 
+    const botCommands = useMemo(() => [
+        { name: '/start', description: 'Show command menu' },
+        { name: '/help', description: 'List available commands' },
+        { name: '/ping', description: 'Check bot status' },
+        { name: '/time', description: 'Show current time' },
+        { name: '/roll', description: 'Roll a dice' },
+        { name: '/echo', description: 'Repeat your text' },
+        { name: '/whoami', description: 'Show your user id' },
+    ], []);
+
     const typingTimeout = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
     const isTypingRef = useRef(false);
 
@@ -220,6 +230,19 @@ export default function Layout() {
             sendTyping(String(selectedContact.id), false);
         }
     };
+
+    const commandMatches = useMemo(() => {
+        const raw = outletInput.trimStart();
+        if (!raw.startsWith('/')) return [];
+
+        const query = raw.slice(1).toLowerCase();
+        if (!query) return botCommands.slice(0, 6);
+
+        return botCommands.filter((command) =>
+            command.name.toLowerCase().includes(query) ||
+            command.description.toLowerCase().includes(query)
+        );
+    }, [botCommands, outletInput]);
 
     const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         setOutletInput(e.target.value);
@@ -236,6 +259,17 @@ export default function Layout() {
             isTypingRef.current = false;
             sendTyping(String(selectedContact.id), false);
         }, 2000);
+    };
+
+    const applyCommand = (commandName: string) => {
+        setOutletInput(`${commandName} `);
+    };
+
+    const handleComposerKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+        if (e.key === 'Tab' && commandMatches.length > 0) {
+            e.preventDefault();
+            applyCommand(commandMatches[0].name);
+        }
     };
 
     const sendMutation = useMutation({
@@ -283,8 +317,8 @@ export default function Layout() {
 
             const createdMessage = await sendMutation.mutateAsync(
                 selectedGroup
-                    ? { conversation_id: selectedGroup.id, body: undefined }
-                    : { to_user: String(selectedContact!.id), body: undefined }
+                    ? { conversation_id: selectedGroup.id, body: undefined, encrypted: false }
+                    : { to_user: String(selectedContact!.id), body: undefined, encrypted: false }
             );
 
             const messageId = createdMessage?.id;
@@ -640,14 +674,36 @@ export default function Layout() {
                                 </div>
                             )}
 
-                            <input
-                                type="text"
-                                value={outletInput}
-                                onChange={handleInputChange}
-                                placeholder="Type here..."
-                                disabled={!selectedContact && !selectedGroup}
-                                className="composer-text-input"
-                            />
+                            <div className="chat-composer__input-wrap">
+                                <input
+                                    type="text"
+                                    value={outletInput}
+                                    onChange={handleInputChange}
+                                    onKeyDown={handleComposerKeyDown}
+                                    placeholder="Type here..."
+                                    disabled={!selectedContact && !selectedGroup}
+                                    className="composer-text-input"
+                                />
+
+                                {commandMatches.length > 0 && (
+                                    <div className="chat-composer__command-menu" role="listbox" aria-label="Bot commands">
+                                        {commandMatches.slice(0, 5).map((command) => (
+                                            <button
+                                                key={command.name}
+                                                type="button"
+                                                className="chat-composer__command-item"
+                                                onMouseDown={(event) => {
+                                                    event.preventDefault();
+                                                    applyCommand(command.name);
+                                                }}
+                                            >
+                                                <span>{command.name}</span>
+                                                <small>{command.description}</small>
+                                            </button>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
                             <button
                                 type="submit"
                                 disabled={!outletInput.trim() || (!selectedContact && !selectedGroup) || sendMutation.isPending}

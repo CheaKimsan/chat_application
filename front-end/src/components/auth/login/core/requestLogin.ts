@@ -2,8 +2,9 @@ import axios from "axios";
 import { LoginPayload, LoginResponse, RawLoginResponse } from "./login.model";
 import { setTokens } from "../../../../api/apiClient";
 import { connectSocket } from "../../../../socket/socketClient";
+import { getApiBaseUrl } from "../../../../config/runtime";
 
-const API_BASE_URL = `${window.location.protocol}//${window.location.hostname}:8000/api/v1`;
+const API_BASE_URL = getApiBaseUrl();
 
 export const loginRequest = async (payload: LoginPayload): Promise<LoginResponse> => {
     const { data } = await axios.post<RawLoginResponse>(

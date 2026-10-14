@@ -191,8 +191,6 @@ func isTransientNetworkError(err error) bool {
 	return false
 }
 
-// extractModelText joins the text parts of every "model_output" step and
-// skips "thought" steps. It returns "" when no reply text is present.
 func extractModelText(interaction interface{}) string {
 	raw, err := json.Marshal(interaction)
 	if err != nil {
