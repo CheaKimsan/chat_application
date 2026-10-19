@@ -11,9 +11,14 @@ import (
 )
 
 // NewHelperBot builds a small example bot. id must be the user id of the bot's
-// row in the users table.
-func NewHelperBot(id string) *Bot {
+// row in the users table. If online is provided, /online reports the current
+// connected-user count from the app state.
+func NewHelperBot(id string, online ...func() int) *Bot {
 	b := New(id, "Helper Bot")
+	countOnline := func() int { return 0 }
+	if len(online) > 0 && online[0] != nil {
+		countOnline = online[0]
+	}
 
 	b.Command("start", "Show the main menu", func(context.Context, Message, string) (Reply, error) {
 		return Reply{
@@ -29,7 +34,12 @@ func NewHelperBot(id string) *Bot {
 		return Reply{Text: "pong"}, nil
 	})
 
+	b.Command("online", "Show current online users", func(_ context.Context, _ Message, _ string) (Reply, error) {
+		return Reply{Text: fmt.Sprintf("Users online: %d", countOnline())}, nil
+	})
+
 	b.Command("time", "Current time, e.g. /time Asia/Phnom_Penh", timeCmd)
+
 	b.Command("roll", "Roll a dice, e.g. /roll 20", rollCmd)
 
 	b.Command("echo", "Repeat your text", func(_ context.Context, _ Message, args string) (Reply, error) {
@@ -58,15 +68,23 @@ func NewHelperBot(id string) *Bot {
 }
 
 func timeCmd(_ context.Context, _ Message, args string) (Reply, error) {
-	loc := time.UTC
-	if args != "" {
-		l, err := time.LoadLocation(args)
+	loc, err := time.LoadLocation("Asia/Phnom_Penh")
+	if err != nil {
+		return Reply{}, err
+	}
+	if strings.TrimSpace(args) != "" {
+		l, err := time.LoadLocation(strings.TrimSpace(args))
 		if err != nil {
-			return Reply{Text: "Unknown timezone. Example: /time Asia/Phnom_Penh"}, nil
+			return Reply{
+				Text: "Unknown timezone. Example: /time Asia/Tokyo",
+			}, nil
 		}
 		loc = l
 	}
-	return Reply{Text: time.Now().In(loc).Format("Mon 02 Jan 2006, 15:04:05 MST")}, nil
+
+	return Reply{
+		Text: time.Now().In(loc).Format("Mon 02 Jan 2006, 15:04:05 MST"),
+	}, nil
 }
 
 func rollCmd(_ context.Context, _ Message, args string) (Reply, error) {

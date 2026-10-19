@@ -10,25 +10,16 @@ const emitChatEvent = (type: string, payload: unknown) => {
     window.dispatchEvent(new CustomEvent(type, { detail: payload }));
 };
 
-// Decodes the JWT payload without verifying the signature (verification
-// is the server's job) just to read `exp` and decide whether it's worth
-// connecting with this token or refreshing first.
 function isTokenExpiringSoon(token: string, bufferSeconds = 30): boolean {
     try {
         const payload = JSON.parse(atob(token.split(".")[1]));
         const expMs = payload.exp * 1000;
         return Date.now() > expMs - bufferSeconds * 1000;
     } catch {
-        return true; // unparsable — treat as unusable, force a refresh
+        return true;
     }
 }
 
-// Guarantees the token handed to the WebSocket handshake is actually
-// still valid. This is the fix for the exact failure we just saw: a
-// stale access token (already past its exp) being passed straight into
-// `new WebSocket(...)`, which the server's AuthMiddleware rejects at
-// the upgrade — a failure the browser only reports as a generic
-// "connection failed", not a 401.
 async function ensureValidAccessToken(candidate?: string): Promise<string> {
     const token = candidate ?? getAccessToken();
     if (!token || isTokenExpiringSoon(token)) {
@@ -42,9 +33,6 @@ export const connectSocket = async (token?: string) => {
     manualDisconnect = false;
 
     if (socket) {
-        // We're intentionally replacing this socket — strip its
-        // onclose handler first so it doesn't also try to reconnect
-        // and race with the new connection we're about to open.
         socket.onclose = null;
         socket.close();
     }
@@ -94,15 +82,6 @@ export const connectSocket = async (token?: string) => {
             return;
         }
 
-        // Server pushes this once a call_history row has been written
-        // (on call end/miss/reject/etc.), so open chat windows can show
-        // the new call card immediately instead of waiting for the next
-        // full reload of ChatWindow's call-history query. The record's
-        // shape mirrors CallHistoryResponse from request.ts: 1:1 calls
-        // carry to_user, group calls carry group_id instead — branch the
-        // dispatched detail so ChatWindow's listener (which matches on
-        // either contactId or groupId depending on the open conversation)
-        // can find the right one.
         if (payload.type === "call_history") {
             const record = payload.record ?? payload;
             const records = [record];

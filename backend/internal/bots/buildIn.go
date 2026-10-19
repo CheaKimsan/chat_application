@@ -1,9 +1,3 @@
-// Package bots is a small in-process bot framework for your own chat system.
-//
-// A bot is a normal row in the users table (flagged is_bot) plus a Go object
-// from this package. When a user sends a message to a bot's user id, the
-// message service hands the text to Registry.Dispatch and sends the returned
-// Reply back into the conversation as a message from the bot.
 package bots
 
 import (
@@ -17,8 +11,6 @@ import (
 	"golang.org/x/time/rate"
 )
 
-// Button is an optional clickable button under a bot message. When clicked,
-// the frontend sends Data back to the bot (use it like Telegram callback data).
 type Button struct {
 	Label string `json:"label"`
 	Data  string `json:"data"`

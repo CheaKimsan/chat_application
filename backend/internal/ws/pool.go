@@ -85,6 +85,12 @@ func (pool *Pool) Start() {
 	}
 }
 
+func (pool *Pool) Count() int {
+	pool.mu.RLock()
+	defer pool.mu.RUnlock()
+	return len(pool.Clients)
+}
+
 func (pool *Pool) SendToUser(userID string, payload any) bool {
 	pool.mu.RLock()
 	client, ok := pool.Clients[userID]

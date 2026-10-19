@@ -13,6 +13,7 @@ import (
 	"golang-jwt-project/internal/bots"
 	"golang-jwt-project/internal/handlers"
 	"golang-jwt-project/internal/middleware"
+	"golang-jwt-project/internal/monitor"
 	"golang-jwt-project/internal/notify"
 	"golang-jwt-project/internal/repository"
 	"golang-jwt-project/internal/services"
@@ -70,9 +71,9 @@ func NewRouter(db *sql.DB, pool *ws.Pool, jwtSecret []byte, refreshSecret []byte
 	router.Use(Logger())
 	router.Use(globalLimiter.Middleware())
 
-	cryptoKey, err := base64.StdEncoding.DecodeString("wZ8KkUKjXlzw18cPeu7Tbj+4F8e8RmiSK8K5YihaxtA=")
+	cryptoKey, err := base64.StdEncoding.DecodeString(os.Getenv("AES_KEY"))
 	if err != nil || len(cryptoKey) != 32 {
-		log.Fatal("invalid AES key: must be base64-encoded 32 bytes")
+		log.Fatal("invalid AES_KEY: must be base64-encoded 32 bytes (set it in .env)")
 	}
 
 	userRepo := repository.NewUserRepository(db)
@@ -90,7 +91,6 @@ func NewRouter(db *sql.DB, pool *ws.Pool, jwtSecret []byte, refreshSecret []byte
 
 	authService := services.NewAuthService(userRepo, refreshRepo, passwordResetRepo, tokenService, smtpFrom, smtpAppPassword, smtpHost, smtpPort)
 
-	// --- MinIO wiring ---
 	minioStore, err := storage.NewMinioStorage(
 		os.Getenv("MINIO_ENDPOINT"),
 		os.Getenv("MINIO_ACCESS_KEY"),
@@ -113,12 +113,30 @@ func NewRouter(db *sql.DB, pool *ws.Pool, jwtSecret []byte, refreshSecret []byte
 		log.Println("warning: TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID not set — login alerts to Telegram are disabled")
 	}
 
+	// --- server monitor wiring ---
+	monitorInstance := monitor.New(monitor.Config{
+		Interval:      10 * time.Second,
+		History:       360,
+		WarnRatio:     0.8,
+		MaxOnline:     500,
+		MaxInFlight:   200,
+		MaxGoroutines: 2000,
+	}, func() int {
+		return 0
+	}, db.Stats, telegramNotifier.SendAsync)
+
+	router.Use(monitorInstance.Recovery(), monitorInstance.Middleware())
+
 	// --- in-app bot wiring ---
 	botRegistry := bots.NewRegistry()
-	id := os.Getenv("HELPER_BOT_USER_ID")
-	log.Printf("bots: HELPER_BOT_USER_ID=%q", id)
-	if id != "" {
-		botRegistry.Add(bots.NewHelperBot(id))
+	helperBotID := os.Getenv("HELPER_BOT_USER_ID")
+	log.Printf("bots: HELPER_BOT_USER_ID=%q", helperBotID)
+	if helperBotID != "" {
+		bot := bots.NewHelperBot(helperBotID, pool.Count)
+		monitorInstance.RegisterCommands(bot, func(userID string) bool {
+			return true
+		})
+		botRegistry.Add(bot)
 	}
 
 	authHandler := handlers.NewAuthHandler(authService, inviteService, telegramNotifier)

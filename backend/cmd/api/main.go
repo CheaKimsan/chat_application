@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"golang-jwt-project/internal/middleware"
 	"log"
 	"os"
@@ -45,7 +46,7 @@ func main() {
 
 	botCtx, stopBot := context.WithCancel(context.Background())
 	defer stopBot()
-	startTelegramBot(botCtx, links)
+	startTelegramBot(botCtx, links, pool.Count)
 
 	globalLimiter := middleware.NewRateLimiter(rate.Limit(20), 40)
 	authLimiter := middleware.NewRateLimiter(rate.Limit(0.5), 3)
@@ -76,7 +77,7 @@ func loadProjectEnv() error {
 	return godotenv.Load()
 }
 
-func startTelegramBot(ctx context.Context, links *telegrambot.LoginLinks) {
+func startTelegramBot(ctx context.Context, links *telegrambot.LoginLinks, online func() int) {
 	token := os.Getenv("TELEGRAM_BOT_TOKEN")
 	if token == "" {
 		log.Println("telegram bot disabled: TELEGRAM_BOT_TOKEN is not set")
@@ -90,6 +91,12 @@ func startTelegramBot(ctx context.Context, links *telegrambot.LoginLinks) {
 	}
 
 	bot := telegrambot.New(token, adminID)
+	bot.Handle("online", func(context.Context, string) string {
+		if online == nil {
+			return "Users online: 0"
+		}
+		return fmt.Sprintf("Users online: %d", online())
+	})
 	bot.EnableLogin(links, os.Getenv("TELEGRAM_LOGIN_USER_ID"), os.Getenv("APP_BASE_URL")) // NEW
 	go bot.Run(ctx)
 }
