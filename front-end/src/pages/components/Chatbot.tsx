@@ -24,12 +24,23 @@ export default function Chatbot() {
     const [draft, setDraft] = useState("");
     const [isSending, setIsSending] = useState(false);
     const [error, setError] = useState("");
+
     const nextId = useRef(0);
     const endOfMessagesRef = useRef<HTMLDivElement | null>(null);
+    const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
+    // Auto-scroll to bottom
     useEffect(() => {
         endOfMessagesRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
     }, [messages, isSending]);
+
+    // Auto-resize textarea
+    useEffect(() => {
+        const el = textareaRef.current;
+        if (!el) return;
+        el.style.height = "auto";
+        el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+    }, [draft]);
 
     const sendMessage = async (value: string) => {
         const message = value.trim();
@@ -71,6 +82,9 @@ export default function Chatbot() {
         setMessages([]);
         setError("");
         setDraft("");
+        if (textareaRef.current) {
+            textareaRef.current.focus();
+        }
     };
 
     return (
@@ -84,7 +98,7 @@ export default function Chatbot() {
                     <span className="assistant-identity__icon"><Sparkles size={17} /></span>
                     <div>
                         <h1>AI Assistant</h1>
-                        <span>Ready to help</span>
+                        <span className="assistant-status">Ready to help</span>
                     </div>
                 </div>
                 <button
@@ -95,7 +109,7 @@ export default function Chatbot() {
                     title="Start a new chat"
                     aria-label="Start a new chat"
                 >
-                    <Plus size={17} />
+                    <Plus size={16} />
                     <span>New chat</span>
                 </button>
             </header>
@@ -103,7 +117,7 @@ export default function Chatbot() {
             <div className={`assistant-thread${messages.length === 0 ? " assistant-thread--empty" : ""}`}>
                 {messages.length === 0 ? (
                     <div className="assistant-welcome">
-                        <span className="assistant-welcome__mark"><Sparkles size={22} /></span>
+                        <span className="assistant-welcome__mark"><Sparkles size={24} /></span>
                         <p className="assistant-eyebrow">A fresh start</p>
                         <h2>What’s on your mind{username ? `, ${username}` : ""}?</h2>
                         <p className="assistant-welcome__copy">Bring a question, a rough draft, or an idea you want to shape.</p>
@@ -111,7 +125,7 @@ export default function Chatbot() {
                             {starterPrompts.map((prompt) => (
                                 <button key={prompt} type="button" onClick={() => void sendMessage(prompt)}>
                                     <span>{prompt}</span>
-                                    <ArrowUpRight size={14} />
+                                    <ArrowUpRight size={15} />
                                 </button>
                             ))}
                         </div>
@@ -125,7 +139,9 @@ export default function Chatbot() {
                                 </span>
                                 <div className="assistant-message__body">
                                     <span className="assistant-message__author">{message.role === "assistant" ? "Assistant" : "You"}</span>
-                                    <p>{message.content}</p>
+                                    <div className="assistant-message__bubble">
+                                        <p>{message.content}</p>
+                                    </div>
                                 </div>
                             </article>
                         ))}
@@ -134,11 +150,13 @@ export default function Chatbot() {
                                 <span className="assistant-message__avatar"><Bot size={16} /></span>
                                 <div className="assistant-message__body">
                                     <span className="assistant-message__author">Assistant</span>
-                                    <span className="assistant-thinking"><i /><i /><i /></span>
+                                    <div className="assistant-message__bubble">
+                                        <span className="assistant-thinking"><i /><i /><i /></span>
+                                    </div>
                                 </div>
                             </div>
                         )}
-                        <div ref={endOfMessagesRef} />
+                        <div ref={endOfMessagesRef} className="assistant-end" />
                     </div>
                 )}
             </div>
@@ -147,6 +165,7 @@ export default function Chatbot() {
                 {error && <p className="assistant-error" role="alert">{error}</p>}
                 <form className="assistant-composer" onSubmit={handleSubmit}>
                     <textarea
+                        ref={textareaRef}
                         value={draft}
                         onChange={(event) => setDraft(event.target.value)}
                         onKeyDown={handleKeyDown}
@@ -158,6 +177,7 @@ export default function Chatbot() {
                     />
                     <button
                         type="submit"
+                        className="assistant-send-btn"
                         disabled={!draft.trim() || isSending}
                         title="Send message"
                         aria-label="Send message"
@@ -165,6 +185,7 @@ export default function Chatbot() {
                         {isSending ? <LoaderCircle className="assistant-send-spinner" size={18} /> : <Send size={17} />}
                     </button>
                 </form>
+                <p className="assistant-disclaimer">AI can make mistakes. Consider verifying important information.</p>
             </div>
         </section>
     );

@@ -16,8 +16,27 @@ require (
 	github.com/minio/minio-go/v7 v7.3.0
 	github.com/pion/webrtc/v4 v4.2.20
 	github.com/stretchr/testify v1.12.1
+	github.com/tmc/langchaingo v0.1.15
 	golang.org/x/crypto v0.55.0
 	golang.org/x/time v0.15.0
+)
+
+require (
+	cloud.google.com/go/ai v0.7.0 // indirect
+	cloud.google.com/go/aiplatform v1.89.0 // indirect
+	cloud.google.com/go/auth/oauth2adapt v0.2.8 // indirect
+	cloud.google.com/go/iam v1.5.2 // indirect
+	cloud.google.com/go/longrunning v0.6.7 // indirect
+	cloud.google.com/go/vertexai v0.12.0 // indirect
+	github.com/dlclark/regexp2 v1.12.0 // indirect
+	github.com/google/generative-ai-go v0.15.1 // indirect
+	github.com/pkoukk/tiktoken-go v0.1.6 // indirect
+	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.61.0 // indirect
+	golang.org/x/oauth2 v0.30.0 // indirect
+	golang.org/x/sync v0.22.0 // indirect
+	google.golang.org/api v0.247.0 // indirect
+	google.golang.org/genproto v0.0.0-20250603155806-513f23925822 // indirect
+	google.golang.org/genproto/googleapis/api v0.0.0-20250818200422-3122310a409c // indirect
 )
 
 require (
@@ -63,7 +82,7 @@ require (
 	github.com/pion/logging v0.2.4 // indirect
 	github.com/pion/mdns/v2 v2.2.0 // indirect
 	github.com/pion/randutil v0.1.0 // indirect
-	github.com/pion/rtcp v1.2.17 // indirect
+	github.com/pion/rtcp v1.2.17
 	github.com/pion/rtp v1.10.5 // indirect
 	github.com/pion/sctp v1.11.1 // indirect
 	github.com/pion/sdp/v3 v3.0.19 // indirect

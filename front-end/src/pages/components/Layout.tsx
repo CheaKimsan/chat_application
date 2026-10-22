@@ -41,6 +41,7 @@ export default function Layout() {
     const navigate = useNavigate();
     const location = useLocation();
     const isAssistantView = location.pathname === '/dashboard/assistant';
+    const isShopView = location.pathname === '/dashboard/shop';
 
     useEffect(() => {
         if (!token) return;
@@ -549,15 +550,15 @@ export default function Layout() {
                 />
             )}
 
-            <main className={`layout-main${isAssistantView ? ' layout-main--assistant' : ''}`}>
-                {!isAssistantView && (selectedContact || selectedGroup) && <ChatHeader contact={contact} isTyping={isTyping} />}
-                {!isAssistantView && selectedContact && <CallPanel contactId={selectedContact.id} />}
-                {!isAssistantView && selectedGroup && (
+            <main className={`layout-main${isAssistantView ? ' layout-main--assistant' : ''}${isShopView ? ' layout-main--shop' : ''}`}>
+                {!isAssistantView && !isShopView && (selectedContact || selectedGroup) && <ChatHeader contact={contact} isTyping={isTyping} />}
+                {!isAssistantView && !isShopView && selectedContact && <CallPanel contactId={selectedContact.id} />}
+                {!isAssistantView && !isShopView && selectedGroup && (
                     <GroupCallPanel
                         conversationId={selectedGroup.id}
                         members={selectedGroup.members
-                            .filter((m) => String(m.id) !== String(user?.id))       // exclude self
-                            .filter((m) => onlineUsers.has(String(m.id)))           // ✅ only online
+                            .filter((m) => String(m.id) !== String(user?.id))
+                            .filter((m) => onlineUsers.has(String(m.id)))
                             .map((m) => ({
                                 id: String(m.id),
                                 username: m.username,
@@ -571,7 +572,7 @@ export default function Layout() {
                     {user && <UserMenu username={user.username} email={user.email} onLogout={handleLogout} />}
                 </div>
                 <div className="layout-content">
-                    <div className={`layout-scroll${isAssistantView ? ' layout-scroll--assistant' : ''}`}>
+                    <div className={`layout-scroll${isAssistantView ? ' layout-scroll--assistant' : ''}${isShopView ? ' layout-scroll--shop' : ''}`}>
                         <Outlet context={{
                             outletInput,
                             setOutletInput,
@@ -585,7 +586,7 @@ export default function Layout() {
                         }} />
                     </div>
 
-                    {!isAssistantView && (selectedContact || selectedGroup) && (
+                    {!isAssistantView && !isShopView && (selectedContact || selectedGroup) && (
                         <form
                             onSubmit={(e) => {
                                 e.preventDefault();

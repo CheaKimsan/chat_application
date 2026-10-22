@@ -10,6 +10,28 @@ interface PublicKeyResponse {
     public_key: string;
 }
 
+export interface ShopProduct {
+    id: number;
+    name: string;
+    description: string;
+    price_cents: number;
+    stock: number;
+}
+
+export interface ShopOrderLine {
+    name: string;
+    quantity: number;
+    price_cents: number;
+}
+
+export interface ShopOrder {
+    id: number;
+    status: string;
+    total_cents: number;
+    created_at: string;
+    lines: ShopOrderLine[];
+}
+
 
 export function getAccessToken(): string | null {
     return localStorage.getItem("access_token");
@@ -126,4 +148,26 @@ export const reqUpdateMyPublicKey = async (publicKeyB64: string): Promise<void> 
 export const reqChatbotReply = async (message: string): Promise<string> => {
     const response = await apiClient.post<{ reply: string }>("/chatbot", { message });
     return response.data.reply;
+};
+
+export const reqListShopProducts = async (params: { q?: string; max_cents?: number }): Promise<ShopProduct[]> => {
+    const response = await apiClient.get<{ products: ShopProduct[] }>("/shop/products", {
+        params: { ...params, limit: 50 },
+    });
+    return response.data.products;
+};
+
+export const reqShopAssistantReply = async (message: string): Promise<string> => {
+    const response = await apiClient.post<{ reply: string }>("/shop/assistant", { message });
+    return response.data.reply;
+};
+
+export const reqListShopOrders = async (): Promise<ShopOrder[]> => {
+    const response = await apiClient.get<{ orders: ShopOrder[] }>("/shop/orders");
+    return response.data.orders;
+};
+
+export const reqPlaceShopOrder = async (cart: Record<number, number>): Promise<ShopOrder> => {
+    const response = await apiClient.post<{ order: ShopOrder }>("/shop/orders", { cart });
+    return response.data.order;
 };

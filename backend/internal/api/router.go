@@ -129,6 +129,9 @@ func NewRouter(db *sql.DB, pool *ws.Pool, jwtSecret []byte, refreshSecret []byte
 
 	// --- in-app bot wiring ---
 	botRegistry := bots.NewRegistry()
+	shopRepo := repository.NewShopRepository(db)
+	shopAI := bots.NewShop(shopRepo)
+	shopAI.ConfigureAI(os.Getenv("GEMINI_API_KEY"), os.Getenv("GEMINI_MODEL"))
 	helperBotID := os.Getenv("HELPER_BOT_USER_ID")
 	log.Printf("bots: HELPER_BOT_USER_ID=%q", helperBotID)
 	if helperBotID != "" {
@@ -137,6 +140,13 @@ func NewRouter(db *sql.DB, pool *ws.Pool, jwtSecret []byte, refreshSecret []byte
 			return true
 		})
 		botRegistry.Add(bot)
+	}
+	shopBotID := os.Getenv("SHOP_BOT_USER_ID")
+	if shopBotID != "" {
+		shopBot := bots.New(shopBotID, "Shop AI")
+		shopAI.Register(shopBot)
+		botRegistry.Add(shopBot)
+		log.Printf("bots: Shop AI registered for user %q", shopBotID)
 	}
 
 	authHandler := handlers.NewAuthHandler(authService, inviteService, telegramNotifier)
@@ -153,6 +163,7 @@ func NewRouter(db *sql.DB, pool *ws.Pool, jwtSecret []byte, refreshSecret []byte
 	uploadService := services.NewUploadService(attachmentRepo, minioStore)
 	messageHandler := handlers.NewMessageHandler(messageService, uploadService, pool)
 	chatbotHandler := handlers.NewChatbotHandler(os.Getenv("GEMINI_API_KEY"), os.Getenv("GEMINI_MODEL"))
+	shopHandler := handlers.NewShopHandler(shopRepo, shopAI)
 
 	router.GET("/image/:userId/:messageId/:file", handleImage())
 
@@ -181,6 +192,10 @@ func NewRouter(db *sql.DB, pool *ws.Pool, jwtSecret []byte, refreshSecret []byte
 		chatbot := api.Group("/chatbot")
 		chatbot.Use(middleware.AuthMiddleware(jwtSecret))
 		chatbot.POST("", chatbotHandler.Generate)
+
+		shop := api.Group("/shop")
+		shop.Use(middleware.AuthMiddleware(jwtSecret))
+		shopHandler.RegisterRoutes(shop)
 
 		api.GET("/invites/validate", inviteHandler.ValidateInvite)
 		invites := api.Group("/invites")

@@ -7,6 +7,7 @@ import RegisterForm from "./components/auth/register/RegisterForm";
 import ForgotPasswordForm from "./components/auth/forgot-password/ForgotPassword";
 import ResetPasswordForm from "./components/auth/forgot-password/ResetPasswordForm";
 import Chatbot from "./pages/components/Chatbot";
+import ShopPage from "./pages/components/ShopPage";
 
 function App() {
 
@@ -26,6 +27,7 @@ function App() {
             >
                 <Route index element={<ChatWindow />} />
                 <Route path="assistant" element={<Chatbot />} />
+                <Route path="shop" element={<ShopPage />} />
             </Route>
         </Routes>
     );
