@@ -10,9 +10,6 @@ import (
 	"time"
 )
 
-// NewHelperBot builds a small example bot. id must be the user id of the bot's
-// row in the users table. If online is provided, /online reports the current
-// connected-user count from the app state.
 func NewHelperBot(id string, online ...func() int) *Bot {
 	b := New(id, "Helper Bot")
 	countOnline := func() int { return 0 }

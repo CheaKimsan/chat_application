@@ -50,27 +50,3 @@ func CallerFromContext(c *gin.Context) (id string, role string) {
 	role, _ = claims["role"].(string)
 	return id, role
 }
-
-//func rateLimit(next http.Handler, rps, burst int) http.Handler {
-//	clients := make(map[string]*rate.Limiter)
-//	var mu sync.Mutex
-//
-//	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-//		ip := realip.FromRequest(r)
-//
-//		mu.Lock()
-//		limiter, ok := clients[ip]
-//		if !ok {
-//			limiter = rate.NewLimiter(rate.Limit(rps), burst)
-//			clients[ip] = limiter
-//		}
-//		mu.Unlock()
-//
-//		if !limiter.Allow() {
-//			http.Error(w, "too many requests", http.StatusTooManyRequests)
-//			return
-//		}
-//
-//		next.ServeHTTP(w, r)
-//	})
-//}

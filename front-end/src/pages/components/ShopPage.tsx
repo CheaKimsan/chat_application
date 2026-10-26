@@ -1,4 +1,4 @@
-import { FormEvent, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, useDeferredValue, useEffect, useMemo, useRef, useState, KeyboardEvent } from "react";
 import { AxiosError } from "axios";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -25,7 +25,6 @@ import {
     ShopOrder,
     ShopProduct,
 } from "../../api/apiClient";
-import "./ShopPage.css";
 
 type ShopTab = "catalog" | "orders" | "assistant";
 type CartItem = { product: ShopProduct; quantity: number };
@@ -60,8 +59,11 @@ export default function ShopPage() {
     const [assistantDraft, setAssistantDraft] = useState("");
     const [assistantError, setAssistantError] = useState("");
     const [isAssistantSending, setIsAssistantSending] = useState(false);
+
     const nextAssistantMessageID = useRef(0);
     const assistantEndRef = useRef<HTMLDivElement | null>(null);
+    const assistantInputRef = useRef<HTMLTextAreaElement | null>(null);
+
     const deferredSearch = useDeferredValue(search.trim());
     const maxCents = maxPrice.trim() ? Math.round(Number(maxPrice) * 100) : undefined;
 
@@ -130,9 +132,18 @@ export default function ShopPage() {
         });
     };
 
+    // Auto-scroll AI thread
     useEffect(() => {
         assistantEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
     }, [assistantMessages, isAssistantSending]);
+
+    // Auto-grow AI textarea
+    useEffect(() => {
+        const el = assistantInputRef.current;
+        if (!el) return;
+        el.style.height = "auto";
+        el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
+    }, [assistantDraft]);
 
     const sendAssistantMessage = async (value: string) => {
         const message = value.trim();
@@ -169,6 +180,13 @@ export default function ShopPage() {
         void sendAssistantMessage(assistantDraft);
     };
 
+    const handleAssistantKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+        if (event.key === "Enter" && !event.shiftKey) {
+            event.preventDefault();
+            void sendAssistantMessage(assistantDraft);
+        }
+    };
+
     const handlePriceChange = (value: string) => {
         if (value === "" || /^\d{0,7}(\.\d{0,2})?$/.test(value)) setMaxPrice(value);
     };
@@ -181,7 +199,7 @@ export default function ShopPage() {
                     <h1>Good things, thoughtfully chosen.</h1>
                     <p className="shop-heading__copy">Browse what’s available, then place an order securely.</p>
                 </div>
-                <div className="shop-heading__mark" aria-hidden="true"><ShoppingBag size={25} /></div>
+                <div className="shop-heading__mark" aria-hidden="true"><ShoppingBag size={24} /></div>
             </header>
 
             <div className="shop-toolbar">
@@ -199,12 +217,12 @@ export default function ShopPage() {
                 {tab === "catalog" && (
                     <div className="shop-filters">
                         <label className="shop-search">
-                            <Search size={17} aria-hidden="true" />
+                            <Search size={16} aria-hidden="true" />
                             <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search products" aria-label="Search products" />
                         </label>
                         <label className="shop-price-filter">
                             <span>Up to</span>
-                            <span className="shop-price-filter__input"><span>$</span><input inputMode="decimal" value={maxPrice} onChange={(event) => handlePriceChange(event.target.value)} placeholder="Any price" aria-label="Maximum price in dollars" /></span>
+                            <span className="shop-price-filter__input"><span>$</span><input inputMode="decimal" value={maxPrice} onChange={(event) => handlePriceChange(event.target.value)} placeholder="Any" aria-label="Maximum price in dollars" /></span>
                         </label>
                     </div>
                 )}
@@ -239,18 +257,21 @@ export default function ShopPage() {
                             </article>
                         ))}
                         {isAssistantSending && (
-                            <div className="shop-ai__pending" role="status"><LoaderCircle size={16} /> Checking the catalog…</div>
+                            <div className="shop-ai__pending" role="status"><LoaderCircle className="shop-ai__spinner" size={16} /> Checking the catalog…</div>
                         )}
                         <div ref={assistantEndRef} />
                     </div>
                     {assistantError && <p className="shop-ai__error" role="alert">{assistantError}</p>}
                     <form className="shop-ai__composer" onSubmit={submitAssistantMessage}>
-                        <input
+                        <textarea
+                            ref={assistantInputRef}
                             value={assistantDraft}
                             onChange={(event) => setAssistantDraft(event.target.value)}
-                            placeholder="Ask about a product, price, or stock"
+                            onKeyDown={handleAssistantKeyDown}
+                            placeholder="Ask about a product, price, or stock..."
                             aria-label="Ask Shop AI"
                             maxLength={4000}
+                            rows={1}
                             disabled={isAssistantSending}
                         />
                         <button type="submit" disabled={!assistantDraft.trim() || isAssistantSending} title="Send message" aria-label="Send message">
@@ -269,7 +290,7 @@ export default function ShopPage() {
                             <div className="shop-state" role="status">Loading products…</div>
                         ) : productsQuery.isError ? (
                             <div className="shop-state shop-state--error" role="alert">
-                                <p>{errorMessage(productsQuery.error, "Could not load products. Check the shop database and try again.")}</p>
+                                <p>{errorMessage(productsQuery.error, "Could not load products.")}</p>
                                 <button type="button" onClick={() => void productsQuery.refetch()}>Retry</button>
                             </div>
                         ) : productsQuery.data?.length ? (
@@ -281,7 +302,7 @@ export default function ShopPage() {
                                         <article className="shop-product" key={product.id} style={{ animationDelay: `${Math.min(index, 8) * 35}ms` }}>
                                             <div className={`shop-product__art shop-product__art--${index % 4}`} aria-hidden="true">
                                                 <span>{String(index + 1).padStart(2, "0")}</span>
-                                                <Package size={31} strokeWidth={1.4} />
+                                                <Package size={36} strokeWidth={1.2} />
                                             </div>
                                             <div className="shop-product__info">
                                                 <div className="shop-product__topline">
@@ -294,7 +315,7 @@ export default function ShopPage() {
                                                         {unavailable ? "Out of stock" : `${product.stock} in stock`}
                                                     </span>
                                                     <button type="button" onClick={() => addToCart(product)} disabled={unavailable || quantity >= Math.min(product.stock, 20)}>
-                                                        {quantity ? <><Check size={15} /> Added {quantity}</> : <><Plus size={15} /> Add to bag</>}
+                                                        {quantity ? <><Check size={15} /> Added {quantity}</> : <><Plus size={15} /> Add</>}
                                                     </button>
                                                 </div>
                                             </div>
@@ -328,7 +349,7 @@ export default function ShopPage() {
                                 </div>
                                 <div className="shop-bag__summary"><span>Subtotal</span><strong>{formatPrice(cartTotal)}</strong></div>
                                 <p className="shop-bag__fineprint">Final total is confirmed when your order is placed.</p>
-                                {orderMutation.isError && <p className="shop-error" role="alert">{errorMessage(orderMutation.error, "Could not place the order. Please try again.")}</p>}
+                                {orderMutation.isError && <p className="shop-error" role="alert">{errorMessage(orderMutation.error, "Could not place the order.")}</p>}
                                 <button className="shop-checkout" type="button" disabled={orderMutation.isLoading} onClick={() => { setNotice(""); setConfirmingOrder(true); }}>
                                     Place order <ArrowRight size={16} />
                                 </button>
@@ -362,7 +383,7 @@ export default function ShopPage() {
                         <p className="shop-eyebrow">FINAL CHECK</p>
                         <h2 id="shop-confirm-title">Place this order?</h2>
                         <p>{cartCount} item{cartCount === 1 ? "" : "s"} · {formatPrice(cartTotal)}</p>
-                        {orderMutation.isError && <p className="shop-error" role="alert">{errorMessage(orderMutation.error, "Could not place the order. Please try again.")}</p>}
+                        {orderMutation.isError && <p className="shop-error" role="alert">{errorMessage(orderMutation.error, "Could not place the order.")}</p>}
                         <div className="shop-confirm__actions">
                             <button type="button" onClick={() => { setConfirmingOrder(false); orderMutation.reset(); }}>Keep shopping</button>
                             <button type="button" disabled={orderMutation.isLoading} onClick={() => orderMutation.mutate()}>

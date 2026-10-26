@@ -128,6 +128,10 @@ func (h *MessageHandler) Send(c *gin.Context) {
 
 	msg, err := h.messages.Send(c.Request.Context(), callerID, req)
 	if err != nil {
+		if errors.Is(err, services.ErrUserBlocked) {
+			c.JSON(http.StatusForbidden, gin.H{"message": "direct messaging is unavailable"})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"message": "failed to send message", "error": err.Error()})
 		return
 	}

@@ -15,6 +15,11 @@ interface SidebarProps {
     conversations?: Conversation[];
     activeContactId?: string;
     activeGroupId?: string;
+    blockedUsers?: UserResponse[];
+    blockedUsersLoading?: boolean;
+    blockedUsersError?: boolean;
+    onUnblockUser?: (userId: string) => void;
+    unblockingUserId?: string;
 }
 
 type TypingPayload = {
@@ -98,10 +103,16 @@ export default function Sidebar({
     conversations = [],
     activeContactId,
     activeGroupId,
+    blockedUsers = [],
+    blockedUsersLoading = false,
+    blockedUsersError = false,
+    onUnblockUser,
+    unblockingUserId,
 }: SidebarProps) {
     const user = useAuthStore((s) => s.user);
     const [search, setSearch] = useState("");
     const onlineUsers = usePresenceUsers();
+    const blockedUsersList = blockedUsers ?? [];
 
     const { data: users = [], isLoading, error } = useQuery<UserResponse[]>({
         queryKey: ["users"],
@@ -281,6 +292,52 @@ export default function Sidebar({
                         })
                     )}
                 </div>
+
+                {(blockedUsersList.length > 0 || blockedUsersLoading || blockedUsersError) && (
+                    <>
+                        <div className="sidebar__divider" />
+                        <div className="sidebar__section">
+                            <div className="sidebar__section-head">
+                                <span className="sidebar__section-label">
+                                    Blocked {blockedUsersList.length > 0 && <em>· {blockedUsersList.length}</em>}
+                                </span>
+                            </div>
+                            {blockedUsersLoading ? (
+                                <div className="sidebar__empty">Loading blocked users…</div>
+                            ) : blockedUsersError ? (
+                                <div className="sidebar__empty sidebar__empty--error">Failed to load blocked users</div>
+                            ) : blockedUsersList.map((blockedUser) => (
+                                <div className="sidebar-blocked-row" key={blockedUser.id}>
+                                    <button
+                                        type="button"
+                                        className="sidebar-row"
+                                        onClick={() => onSelectContact(blockedUser)}
+                                    >
+                                        <span className="sidebar-row__avatar">
+                                            {blockedUser.profile_photo ? (
+                                                <img src={blockedUser.profile_photo} alt="" />
+                                            ) : (
+                                                initialsOf(blockedUser.username)
+                                            )}
+                                        </span>
+                                        <span className="sidebar-row__body">
+                                            <span className="sidebar-row__name">{blockedUser.username}</span>
+                                            <span className="sidebar-row__meta">Blocked</span>
+                                        </span>
+                                    </button>
+                                    <button
+                                        type="button"
+                                        className="sidebar-blocked-row__unblock"
+                                        onClick={() => onUnblockUser?.(String(blockedUser.id))}
+                                        disabled={unblockingUserId === String(blockedUser.id)}
+                                    >
+                                        {unblockingUserId === String(blockedUser.id) ? "Unblocking…" : "Unblock"}
+                                    </button>
+                                </div>
+                            ))}
+                        </div>
+                    </>
+                )}
             </div>
         </aside>
     );

@@ -16,20 +16,17 @@ type Button struct {
 	Data  string `json:"data"`
 }
 
-// Reply is what a bot sends back.
 type Reply struct {
 	Text    string     `json:"text"`
-	Buttons [][]Button `json:"buttons,omitempty"` // rows of buttons
+	Buttons [][]Button `json:"buttons,omitempty"`
 }
 
-// Message is what a bot receives.
 type Message struct {
-	UserID         string // who sent it
+	UserID         string
 	ConversationID string
 	Text           string
 }
 
-// Handler runs one command. args is everything after the command name.
 type Handler func(ctx context.Context, m Message, args string) (Reply, error)
 
 type command struct {
@@ -37,12 +34,17 @@ type command struct {
 	handle      Handler
 }
 
-// Bot is a set of commands plus an optional fallback for plain text.
 type Bot struct {
-	ID       string // the bot's user id in the users table
+	ID       string
 	Name     string
 	commands map[string]command
 	fallback Handler
+}
+
+type Registry struct {
+	mu       sync.Mutex
+	bots     map[string]*Bot
+	limiters map[string]*rate.Limiter
 }
 
 func New(id, name string) *Bot {
@@ -51,12 +53,10 @@ func New(id, name string) *Bot {
 	return b
 }
 
-// Command registers /name. Only registered commands can ever run.
 func (b *Bot) Command(name, description string, h Handler) {
 	b.commands[strings.ToLower(strings.TrimPrefix(name, "/"))] = command{description, h}
 }
 
-// Fallback handles any message that is not a command (for example an AI reply).
 func (b *Bot) Fallback(h Handler) { b.fallback = h }
 
 func (b *Bot) help(context.Context, Message, string) (Reply, error) {
@@ -74,8 +74,6 @@ func (b *Bot) help(context.Context, Message, string) (Reply, error) {
 	return Reply{Text: strings.TrimSpace(sb.String())}, nil
 }
 
-// handle parses "/name args" and runs the matching handler. It never panics
-// and never runs longer than the timeout.
 func (b *Bot) handle(ctx context.Context, m Message) (reply Reply) {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
@@ -112,12 +110,7 @@ func (b *Bot) handle(ctx context.Context, m Message) (reply Reply) {
 	return out
 }
 
-// Registry finds the bot for a user id and rate-limits each human user.
-type Registry struct {
-	mu       sync.Mutex
-	bots     map[string]*Bot
-	limiters map[string]*rate.Limiter
-}
+
 
 func NewRegistry() *Registry {
 	return &Registry{bots: map[string]*Bot{}, limiters: map[string]*rate.Limiter{}}
@@ -137,15 +130,12 @@ func (r *Registry) IsBot(userID string) bool {
 	return ok
 }
 
-// Dispatch sends m to the bot with id botUserID. ok is false when that id is
-// not a bot. A user who sends too fast gets a polite "slow down" reply instead
-// of running the command.
 func (r *Registry) Dispatch(ctx context.Context, botUserID string, m Message) (reply Reply, ok bool) {
 	r.mu.Lock()
 	b, found := r.bots[botUserID]
 	lim, hasLim := r.limiters[m.UserID]
 	if !hasLim {
-		lim = rate.NewLimiter(rate.Limit(1), 5) // 1 message/second, bursts of 5
+		lim = rate.NewLimiter(rate.Limit(1), 5)
 		r.limiters[m.UserID] = lim
 	}
 	r.mu.Unlock()

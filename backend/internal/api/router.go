@@ -77,6 +77,7 @@ func NewRouter(db *sql.DB, pool *ws.Pool, jwtSecret []byte, refreshSecret []byte
 	}
 
 	userRepo := repository.NewUserRepository(db)
+	pool.SetBlockChecker(userRepo.IsBlockedBetween)
 	refreshRepo := repository.NewRefreshTokenRepository(db)
 	passwordResetRepo := repository.NewPasswordResetRepository(db)
 	tokenService := services.NewTokenService(jwtSecret, refreshSecret)
@@ -113,7 +114,6 @@ func NewRouter(db *sql.DB, pool *ws.Pool, jwtSecret []byte, refreshSecret []byte
 		log.Println("warning: TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID not set — login alerts to Telegram are disabled")
 	}
 
-	// --- server monitor wiring ---
 	monitorInstance := monitor.New(monitor.Config{
 		Interval:      10 * time.Second,
 		History:       360,
@@ -152,7 +152,7 @@ func NewRouter(db *sql.DB, pool *ws.Pool, jwtSecret []byte, refreshSecret []byte
 	authHandler := handlers.NewAuthHandler(authService, inviteService, telegramNotifier)
 
 	userService := services.NewUserService(userRepo, minioStore)
-	userHandler := handlers.NewUserHandler(userService)
+	userHandler := handlers.NewUserHandler(userService, pool)
 
 	messageRepo := repository.NewMessageRepository(db)
 	attachmentRepo := repository.NewAttachmentRepository(db)

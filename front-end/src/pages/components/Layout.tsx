@@ -8,7 +8,7 @@ import { useTypingUsers } from '../../store/typing.store';
 import { connectSocket, disconnectSocket, sendTyping } from '../../socket/socketClient';
 import UserMenu from "../../shared/UserMenu";
 import { UserResponse } from "../../components/user/core/model";
-import { reqGetUsers } from "../../components/user/core/request";
+import { reqBlockUser, reqGetBlockedUsers, reqGetUsers, reqUnblockUser } from "../../components/user/core/request";
 import { reqSendMessage, reqUploadFile, reqCreateGroup, reqListConversations } from "../../components/message/core/request";
 import { Camera, Lock, MessageCircle, Mic, Paperclip, Send, Square } from 'lucide-react';
 import CallPanel from '../../components/call/CallPanel';
@@ -63,6 +63,29 @@ export default function Layout() {
         queryKey: ["users"],
         queryFn: reqGetUsers,
     });
+    const {
+        data: blockedUsers = [],
+        isLoading: blockedUsersLoading,
+        isError: blockedUsersError,
+    } = useQuery<UserResponse[]>({
+        queryKey: ["blocked-users"],
+        queryFn: reqGetBlockedUsers,
+        enabled: !!token,
+    });
+    const [blockError, setBlockError] = useState<string | null>(null);
+    const blockMutation = useMutation({
+        mutationFn: ({ userId, unblock }: { userId: string; unblock: boolean }) =>
+            unblock ? reqUnblockUser(userId) : reqBlockUser(userId),
+        onSuccess: () => {
+            setBlockError(null);
+            queryClient.invalidateQueries({ queryKey: ["users"] });
+            queryClient.invalidateQueries({ queryKey: ["blocked-users"] });
+        },
+        onError: (error) => {
+            console.error("Failed to update block status:", error);
+            setBlockError("Could not update block status. Please try again.");
+        },
+    });
 
     // Exclude the logged-in user — you can't add yourself as a group member.
     const contactsList = allUsers.filter((u) => u.id !== user?.id);
@@ -89,6 +112,9 @@ export default function Layout() {
 
 
     const onlineUsers = usePresenceUsers();
+    const isSelectedContactBlocked = !!selectedContact && blockedUsers.some(
+        (blockedUser) => String(blockedUser.id) === String(selectedContact.id)
+    );
 
     const contact = selectedGroup
         ? {
@@ -102,7 +128,7 @@ export default function Layout() {
             ? {
                 name: selectedContact.username,
                 freq: '104.2',
-                online: onlineUsers.has(String(selectedContact.id)),
+                online: !isSelectedContactBlocked && onlineUsers.has(String(selectedContact.id)),
                 profilePhoto: selectedContact.profile_photo,
                 initials: (selectedContact.username)
                     .split(' ')
@@ -506,6 +532,7 @@ export default function Layout() {
         stopTyping();
         setSelectedGroup(undefined);
         setSelectedContact(u);
+        setBlockError(null);
         navigate('/dashboard');
     };
 
@@ -513,7 +540,23 @@ export default function Layout() {
         stopTyping();
         setSelectedContact(undefined);
         setSelectedGroup(group);
+        setBlockError(null);
         navigate('/dashboard');
+    };
+
+    const handleToggleBlock = () => {
+        if (!selectedContact || blockMutation.isPending) return;
+        setBlockError(null);
+        blockMutation.mutate({
+            userId: String(selectedContact.id),
+            unblock: isSelectedContactBlocked,
+        });
+    };
+
+    const handleUnblockUser = (userId: string) => {
+        if (blockMutation.isPending) return;
+        setBlockError(null);
+        blockMutation.mutate({ userId, unblock: true });
     };
 
     const handleCreateGroup = async (name: string, memberIds: string[]) => {
@@ -540,6 +583,13 @@ export default function Layout() {
                 conversations={conversations}
                 activeContactId={selectedContact?.id ? String(selectedContact.id) : undefined}
                 activeGroupId={selectedGroup?.id}
+                blockedUsers={blockedUsers}
+                blockedUsersLoading={blockedUsersLoading}
+                blockedUsersError={blockedUsersError}
+                onUnblockUser={handleUnblockUser}
+                unblockingUserId={blockMutation.isPending && blockMutation.variables?.unblock
+                    ? blockMutation.variables.userId
+                    : undefined}
             />
 
             {showCreateGroup && (
@@ -551,8 +601,17 @@ export default function Layout() {
             )}
 
             <main className={`layout-main${isAssistantView ? ' layout-main--assistant' : ''}${isShopView ? ' layout-main--shop' : ''}`}>
-                {!isAssistantView && !isShopView && (selectedContact || selectedGroup) && <ChatHeader contact={contact} isTyping={isTyping} />}
-                {!isAssistantView && !isShopView && selectedContact && <CallPanel contactId={selectedContact.id} />}
+                {!isAssistantView && !isShopView && (selectedContact || selectedGroup) && (
+                    <ChatHeader
+                        contact={contact}
+                        isTyping={isTyping}
+                        isBlocked={isSelectedContactBlocked}
+                        onToggleBlock={selectedContact ? handleToggleBlock : undefined}
+                        isUpdatingBlock={blockMutation.isPending}
+                        blockError={blockError}
+                    />
+                )}
+                {!isAssistantView && !isShopView && selectedContact && !isSelectedContactBlocked && <CallPanel contactId={selectedContact.id} />}
                 {!isAssistantView && !isShopView && selectedGroup && (
                     <GroupCallPanel
                         conversationId={selectedGroup.id}
@@ -605,7 +664,7 @@ export default function Layout() {
                                 <button
                                     type="button"
                                     onClick={() => setIsEncrypted(!isEncrypted)}
-                                    disabled={!selectedContact || sendMutation.isPending}
+                                    disabled={!selectedContact || sendMutation.isPending || isSelectedContactBlocked}
                                     title={isEncrypted ? 'Encrypted chat' : 'Normal chat'}
                                     className="composer-icon-button"
                                 >
@@ -629,7 +688,7 @@ export default function Layout() {
                             <button
                                 type="button"
                                 onClick={() => fileInputRef.current?.click()}
-                                disabled={(!selectedContact && !selectedGroup) || isUploading || isRecording || isVideoRecording}
+                                disabled={(!selectedContact && !selectedGroup) || isSelectedContactBlocked || isUploading || isRecording || isVideoRecording}
                                 className="composer-file-button"
                             >
                                 {isUploading ? (
@@ -643,7 +702,7 @@ export default function Layout() {
                             <button
                                 type="button"
                                 onClick={handleVoiceMessage}
-                                disabled={(!selectedContact && !selectedGroup) || isUploading || isVideoRecording}
+                                disabled={(!selectedContact && !selectedGroup) || isSelectedContactBlocked || isUploading || isVideoRecording}
                                 title={isRecording ? 'Stop recording' : 'Record voice message'}
                                 className={`recording-button${isRecording ? ' recording-button--active' : ''}`}
                             >
@@ -653,7 +712,7 @@ export default function Layout() {
                             <button
                                 type="button"
                                 onClick={handleVideoMessage}
-                                disabled={(!selectedContact && !selectedGroup) || isUploading || isRecording}
+                                disabled={(!selectedContact && !selectedGroup) || isSelectedContactBlocked || isUploading || isRecording}
                                 title={isVideoRecording ? 'Stop video recording' : 'Record video message'}
                                 className={`recording-button${isVideoRecording ? ' recording-button--active' : ''}`}
                             >
@@ -682,7 +741,7 @@ export default function Layout() {
                                     onChange={handleInputChange}
                                     onKeyDown={handleComposerKeyDown}
                                     placeholder="Type here..."
-                                    disabled={!selectedContact && !selectedGroup}
+                                    disabled={(!selectedContact && !selectedGroup) || isSelectedContactBlocked}
                                     className="composer-text-input"
                                 />
 
@@ -707,7 +766,7 @@ export default function Layout() {
                             </div>
                             <button
                                 type="submit"
-                                disabled={!outletInput.trim() || (!selectedContact && !selectedGroup) || sendMutation.isPending}
+                                disabled={!outletInput.trim() || (!selectedContact && !selectedGroup) || isSelectedContactBlocked || sendMutation.isPending}
                                 className={`composer-send-button${outletInput.trim() && (selectedContact || selectedGroup) ? ' composer-send-button--ready' : ''}`}
                             >
                                 {sendMutation.isPending ? 'Sending...' : <Send size={16} />}

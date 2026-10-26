@@ -19,9 +19,9 @@ import (
 )
 
 const (
-	shopMaxPerItem   = 20 // most units of one product in a cart
-	shopMaxCartItems = 30 // most different products in a cart
-	shopMaxButtons   = 8  // product buttons shown under /products
+	shopMaxPerItem   = 20
+	shopMaxCartItems = 30
+	shopMaxButtons   = 8
 )
 
 type Shop struct {
@@ -36,8 +36,6 @@ func NewShop(repo *repository.ShopRepository) *Shop {
 	return &Shop{repo: repo, carts: map[string]map[int]int{}}
 }
 
-// cartFor returns the customer's cart and creates it when missing.
-// The caller MUST hold s.mu.
 func (s *Shop) cartFor(userID string) map[int]int {
 	c := s.carts[userID]
 	if c == nil {
@@ -46,8 +44,6 @@ func (s *Shop) cartFor(userID string) map[int]int {
 	}
 	return c
 }
-
-// snapshotCart returns a copy of the cart that is safe to read without a lock.
 func (s *Shop) snapshotCart(userID string) map[int]int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -57,9 +53,6 @@ func (s *Shop) snapshotCart(userID string) map[int]int {
 	}
 	return out
 }
-
-// takeCart removes and returns the cart in one step. Checkout uses it so that
-// a double-tap on "place order" cannot create two orders.
 func (s *Shop) takeCart(userID string) map[int]int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -68,8 +61,6 @@ func (s *Shop) takeCart(userID string) map[int]int {
 	return c
 }
 
-// restoreCart puts items back after a failed checkout, merging with anything
-// the customer added in the meantime.
 func (s *Shop) restoreCart(userID string, items map[int]int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -88,7 +79,6 @@ func (s *Shop) clearCart(userID string) {
 	s.mu.Unlock()
 }
 
-// money formats cents as dollars: 750 -> "$7.50".
 func money(cents int64) string {
 	sign := ""
 	if cents < 0 {
@@ -98,7 +88,6 @@ func money(cents int64) string {
 	return fmt.Sprintf("%s$%d.%02d", sign, cents/100, cents%100)
 }
 
-// Register adds the shop commands to a bot.
 func (s *Shop) Register(b *Bot) {
 	s.bot = b
 	b.Command("start", "Welcome message", s.cmdStart)
@@ -115,8 +104,6 @@ func (s *Shop) Register(b *Bot) {
 	}
 }
 
-// ConfigureAI enables catalog-aware plain-text replies. Shop actions remain
-// explicit commands so a model response can never place an order by itself.
 func (s *Shop) ConfigureAI(apiKey, model string) {
 	if apiKey == "" {
 		log.Println("shop bot: GEMINI_API_KEY is empty, AI replies are disabled")
@@ -283,8 +270,6 @@ type cartLine struct {
 	qty     int
 }
 
-// cartDetails joins the customer's cart with current product data. Prices
-// always come from the database, never from the cart itself.
 func (s *Shop) cartDetails(ctx context.Context, userID string) ([]cartLine, int64, error) {
 	cart := s.snapshotCart(userID)
 	if len(cart) == 0 {
@@ -312,7 +297,7 @@ func (s *Shop) cartDetails(ctx context.Context, userID string) ([]cartLine, int6
 	for _, id := range ids {
 		p, ok := byID[id]
 		if !ok {
-			continue // product was removed from the shop
+			continue
 		}
 		lines = append(lines, cartLine{product: p, qty: cart[id]})
 		total += int64(cart[id]) * p.PriceCents
@@ -356,8 +341,6 @@ func (s *Shop) cmdClear(ctx context.Context, m Message, args string) (Reply, err
 	}, nil
 }
 
-// cmdCheckout is two steps on purpose: /checkout shows a summary, and only
-// "/checkout confirm" (the "Yes, place order" button) creates the order.
 func (s *Shop) cmdCheckout(ctx context.Context, m Message, args string) (Reply, error) {
 	confirm := strings.EqualFold(strings.TrimSpace(args), "confirm")
 
@@ -381,7 +364,6 @@ func (s *Shop) cmdCheckout(ctx context.Context, m Message, args string) (Reply, 
 		}, nil
 	}
 
-	// Remove the cart first so a double tap cannot place the order twice.
 	cart := s.takeCart(m.UserID)
 	if len(cart) == 0 {
 		return Reply{Text: "Your cart is empty."}, nil

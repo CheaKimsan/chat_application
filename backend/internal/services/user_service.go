@@ -17,6 +17,7 @@ import (
 )
 
 var ErrPublicKeyNotSet = errors.New("public key not set for this user")
+var ErrCannotBlockSelf = errors.New("cannot block yourself")
 
 type UserService struct {
 	users   *repository.UserRepository
@@ -29,6 +30,32 @@ func NewUserService(users *repository.UserRepository, storage *storage.MinioStor
 
 func (s *UserService) ListAll(ctx context.Context) ([]models.UserResponse, error) {
 	return s.users.GetAll(ctx)
+}
+
+func (s *UserService) ListVisible(ctx context.Context, userID string) ([]models.UserResponse, error) {
+	return s.users.GetVisibleTo(ctx, userID)
+}
+
+func (s *UserService) ListBlocked(ctx context.Context, userID string) ([]models.UserResponse, error) {
+	return s.users.GetBlockedBy(ctx, userID)
+}
+
+func (s *UserService) Block(ctx context.Context, blockerID, blockedUserID string) error {
+	if blockerID == blockedUserID {
+		return ErrCannotBlockSelf
+	}
+	return s.users.Block(ctx, blockerID, blockedUserID)
+}
+
+func (s *UserService) Unblock(ctx context.Context, blockerID, blockedUserID string) error {
+	if blockerID == blockedUserID {
+		return ErrCannotBlockSelf
+	}
+	return s.users.Unblock(ctx, blockerID, blockedUserID)
+}
+
+func (s *UserService) IsBlockedBetween(ctx context.Context, userA, userB string) (bool, error) {
+	return s.users.IsBlockedBetween(ctx, userA, userB)
 }
 
 // canModify enforces that a caller can only touch their own user record

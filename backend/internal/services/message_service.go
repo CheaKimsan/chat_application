@@ -20,6 +20,7 @@ type MessageService struct {
 
 var ErrNotConversationMember = errors.New("caller is not a member of this conversation")
 var ErrMissingRecipient = errors.New("either conversation_id or to_user is required")
+var ErrUserBlocked = errors.New("direct messaging is unavailable")
 
 func NewMessageService(messages *repository.MessageRepository, pool *ws.Pool) *MessageService {
 	return &MessageService{messages: messages, pool: pool}
@@ -73,6 +74,13 @@ func (s *MessageService) Send(ctx context.Context, fromUser string, req models.S
 		conversationID = *req.ConversationID
 
 	case req.ToUser != "":
+		blocked, err := s.messages.IsBlockedBetween(ctx, fromUser, req.ToUser)
+		if err != nil {
+			return models.MessageResponse{}, err
+		}
+		if blocked {
+			return models.MessageResponse{}, ErrUserBlocked
+		}
 		id, err := s.messages.FindOrCreateDirectConversation(ctx, fromUser, req.ToUser)
 		if err != nil {
 			return models.MessageResponse{}, err
@@ -81,6 +89,29 @@ func (s *MessageService) Send(ctx context.Context, fromUser string, req models.S
 
 	default:
 		return models.MessageResponse{}, ErrMissingRecipient
+	}
+
+	isGroup, err := s.messages.IsGroupConversation(ctx, conversationID)
+	if err != nil {
+		return models.MessageResponse{}, err
+	}
+	if !isGroup {
+		members, err := s.messages.GetConversationMembers(ctx, conversationID)
+		if err != nil {
+			return models.MessageResponse{}, err
+		}
+		for _, memberID := range members {
+			if memberID == fromUser {
+				continue
+			}
+			blocked, err := s.messages.IsBlockedBetween(ctx, fromUser, memberID)
+			if err != nil {
+				return models.MessageResponse{}, err
+			}
+			if blocked {
+				return models.MessageResponse{}, ErrUserBlocked
+			}
+		}
 	}
 
 	msg, err := s.messages.CreateInConversation(ctx, fromUser, conversationID, req.Body, req.Ciphertext, req.Nonce)

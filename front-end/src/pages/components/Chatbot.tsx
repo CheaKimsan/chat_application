@@ -4,7 +4,6 @@ import { Link } from "react-router-dom";
 import { ArrowLeft, ArrowUpRight, Bot, LoaderCircle, Plus, Send, Sparkles, UserRound } from "lucide-react";
 import { reqChatbotReply } from "../../api/apiClient";
 import { useAuthStore } from "../../store/auth.store";
-import "./Chatbot.css";
 
 type ChatEntry = {
     id: number;
@@ -29,12 +28,10 @@ export default function Chatbot() {
     const endOfMessagesRef = useRef<HTMLDivElement | null>(null);
     const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
-    // Auto-scroll to bottom
     useEffect(() => {
         endOfMessagesRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
     }, [messages, isSending]);
 
-    // Auto-resize textarea
     useEffect(() => {
         const el = textareaRef.current;
         if (!el) return;
@@ -82,9 +79,7 @@ export default function Chatbot() {
         setMessages([]);
         setError("");
         setDraft("");
-        if (textareaRef.current) {
-            textareaRef.current.focus();
-        }
+        if (textareaRef.current) textareaRef.current.focus();
     };
 
     return (
@@ -95,7 +90,7 @@ export default function Chatbot() {
                     <span>Messages</span>
                 </Link>
                 <div className="assistant-identity">
-                    <span className="assistant-identity__icon"><Sparkles size={17} /></span>
+                    <span className="assistant-identity__icon"><Sparkles size={16} /></span>
                     <div>
                         <h1>AI Assistant</h1>
                         <span className="assistant-status">Ready to help</span>
@@ -106,10 +101,8 @@ export default function Chatbot() {
                     type="button"
                     onClick={startNewChat}
                     disabled={messages.length === 0 && !draft}
-                    title="Start a new chat"
-                    aria-label="Start a new chat"
                 >
-                    <Plus size={16} />
+                    <Plus size={15} />
                     <span>New chat</span>
                 </button>
             </header>
@@ -117,7 +110,7 @@ export default function Chatbot() {
             <div className={`assistant-thread${messages.length === 0 ? " assistant-thread--empty" : ""}`}>
                 {messages.length === 0 ? (
                     <div className="assistant-welcome">
-                        <span className="assistant-welcome__mark"><Sparkles size={24} /></span>
+                        <span className="assistant-welcome__mark"><Sparkles size={22} /></span>
                         <p className="assistant-eyebrow">A fresh start</p>
                         <h2>What’s on your mind{username ? `, ${username}` : ""}?</h2>
                         <p className="assistant-welcome__copy">Bring a question, a rough draft, or an idea you want to shape.</p>
@@ -135,7 +128,7 @@ export default function Chatbot() {
                         {messages.map((message) => (
                             <article key={message.id} className={`assistant-message assistant-message--${message.role}`}>
                                 <span className="assistant-message__avatar" aria-hidden="true">
-                                    {message.role === "assistant" ? <Bot size={16} /> : <UserRound size={16} />}
+                                    {message.role === "assistant" ? <Bot size={15} /> : <UserRound size={15} />}
                                 </span>
                                 <div className="assistant-message__body">
                                     <span className="assistant-message__author">{message.role === "assistant" ? "Assistant" : "You"}</span>
@@ -146,8 +139,8 @@ export default function Chatbot() {
                             </article>
                         ))}
                         {isSending && (
-                            <div className="assistant-message assistant-message--assistant" role="status" aria-label="Assistant is responding">
-                                <span className="assistant-message__avatar"><Bot size={16} /></span>
+                            <div className="assistant-message assistant-message--assistant" role="status">
+                                <span className="assistant-message__avatar"><Bot size={15} /></span>
                                 <div className="assistant-message__body">
                                     <span className="assistant-message__author">Assistant</span>
                                     <div className="assistant-message__bubble">
@@ -179,10 +172,9 @@ export default function Chatbot() {
                         type="submit"
                         className="assistant-send-btn"
                         disabled={!draft.trim() || isSending}
-                        title="Send message"
                         aria-label="Send message"
                     >
-                        {isSending ? <LoaderCircle className="assistant-send-spinner" size={18} /> : <Send size={17} />}
+                        {isSending ? <LoaderCircle className="assistant-send-spinner" size={17} /> : <Send size={16} />}
                     </button>
                 </form>
                 <p className="assistant-disclaimer">AI can make mistakes. Consider verifying important information.</p>

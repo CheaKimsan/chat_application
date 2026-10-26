@@ -1,24 +1,28 @@
 package handlers
 
 import (
+	"database/sql"
 	"errors"
 	"golang-jwt-project/internal/utils"
+	"log"
 	"net/http"
 	"path/filepath"
 
 	"golang-jwt-project/internal/middleware"
 	"golang-jwt-project/internal/models"
 	"golang-jwt-project/internal/services"
+	"golang-jwt-project/internal/ws"
 
 	"github.com/gin-gonic/gin"
 )
 
 type UserHandler struct {
 	service *services.UserService
+	pool    *ws.Pool
 }
 
-func NewUserHandler(service *services.UserService) *UserHandler {
-	return &UserHandler{service: service}
+func NewUserHandler(service *services.UserService, pool *ws.Pool) *UserHandler {
+	return &UserHandler{service: service, pool: pool}
 }
 
 // RegisterRoutes wires up the user management routes, e.g. in router.go:
@@ -28,6 +32,9 @@ func NewUserHandler(service *services.UserService) *UserHandler {
 //	userHandler.RegisterRoutes(users)
 func (h *UserHandler) RegisterRoutes(router *gin.RouterGroup) {
 	router.GET("", h.List)
+	router.GET("/blocked", h.ListBlocked)
+	router.POST("/:id/block", h.Block)
+	router.DELETE("/:id/block", h.Unblock)
 	router.PUT("/:id", h.Update)
 	router.DELETE("/:id", h.Delete)
 
@@ -40,12 +47,78 @@ func (h *UserHandler) RegisterRoutes(router *gin.RouterGroup) {
 }
 
 func (h *UserHandler) List(c *gin.Context) {
-	users, err := h.service.ListAll(c.Request.Context())
+	callerID, _ := middleware.CallerFromContext(c)
+	users, err := h.service.ListVisible(c.Request.Context(), callerID)
 	if err != nil {
+		log.Printf("list users for caller %s failed: %v", callerID, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"message": "failed to query users"})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"users": users})
+}
+
+func (h *UserHandler) ListBlocked(c *gin.Context) {
+	callerID, _ := middleware.CallerFromContext(c)
+	users, err := h.service.ListBlocked(c.Request.Context(), callerID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"message": "failed to query blocked users"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"users": users})
+}
+
+func (h *UserHandler) Block(c *gin.Context) {
+	callerID, _ := middleware.CallerFromContext(c)
+	targetID := c.Param("id")
+	if targetID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "user id is required"})
+		return
+	}
+
+	if err := h.service.Block(c.Request.Context(), callerID, targetID); err != nil {
+		switch {
+		case errors.Is(err, services.ErrCannotBlockSelf):
+			c.JSON(http.StatusBadRequest, gin.H{"message": "you cannot block yourself"})
+		case errors.Is(err, sql.ErrNoRows), errors.Is(err, utils.ErrUserNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"message": "user not found"})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"message": "failed to block user"})
+		}
+		return
+	}
+
+	h.refreshPresence(callerID, targetID)
+	c.JSON(http.StatusOK, gin.H{"message": "user blocked"})
+}
+
+func (h *UserHandler) Unblock(c *gin.Context) {
+	callerID, _ := middleware.CallerFromContext(c)
+	targetID := c.Param("id")
+	if targetID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "user id is required"})
+		return
+	}
+
+	if err := h.service.Unblock(c.Request.Context(), callerID, targetID); err != nil {
+		if errors.Is(err, services.ErrCannotBlockSelf) {
+			c.JSON(http.StatusBadRequest, gin.H{"message": "you cannot unblock yourself"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"message": "failed to unblock user"})
+		return
+	}
+
+	h.refreshPresence(callerID, targetID)
+	c.JSON(http.StatusOK, gin.H{"message": "user unblocked"})
+}
+
+func (h *UserHandler) refreshPresence(userIDs ...string) {
+	if h.pool == nil {
+		return
+	}
+	for _, userID := range userIDs {
+		h.pool.RefreshPresence(userID)
+	}
 }
 
 func (h *UserHandler) Update(c *gin.Context) {
@@ -114,6 +187,17 @@ func (h *UserHandler) GetPublicKey(c *gin.Context) {
 	targetID := c.Param("id")
 	if targetID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"message": "user id is required"})
+		return
+	}
+
+	callerID, _ := middleware.CallerFromContext(c)
+	blocked, err := h.service.IsBlockedBetween(c.Request.Context(), callerID, targetID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"message": "failed to check block status"})
+		return
+	}
+	if blocked {
+		c.JSON(http.StatusNotFound, gin.H{"message": "user not found"})
 		return
 	}
 

@@ -71,6 +71,23 @@ func (c *Client) Read() {
 				c.Pool.MediaRelay.RemoveCall(msg.CallID)
 				continue
 			}
+			groupSignal := msg.GroupCallID != "" || len(msg.Members) > 0
+			if msg.ToUser != c.ID && !groupSignal {
+				blocked, err := c.Pool.blockCheckStatus(c.ID, msg.ToUser)
+				if err != nil {
+					log.Printf("failed to check block status for websocket delivery %s/%s: %v", c.ID, msg.ToUser, err)
+					c.Pool.SendToUser(c.ID, Message{Type: "delivery_failed", FromUser: msg.ToUser, ToUser: c.ID, Reason: "could not verify recipient availability"})
+					continue
+				}
+				if blocked {
+					failureType := "delivery_failed"
+					if strings.HasPrefix(msg.Type, "call_") || msg.Type == "ice_candidate" {
+						failureType = "call_failed"
+					}
+					c.Pool.SendToUser(c.ID, Message{Type: failureType, FromUser: msg.ToUser, ToUser: c.ID, CallID: msg.CallID, Reason: "user is unavailable"})
+					continue
+				}
+			}
 			delivered := c.Pool.SendToUser(msg.ToUser, msg)
 			if strings.HasPrefix(msg.Type, "call_") || msg.Type == "ice_candidate" {
 				log.Printf("call signal %s from %s to %s delivered=%t call_id=%s", msg.Type, msg.FromUser, msg.ToUser, delivered, msg.CallID)

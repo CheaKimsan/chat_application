@@ -382,6 +382,27 @@ func (r *MessageRepository) IsConversationMember(ctx context.Context, conversati
 	return exists, err
 }
 
+func (r *MessageRepository) IsGroupConversation(ctx context.Context, conversationID string) (bool, error) {
+	var isGroup bool
+	err := r.db.QueryRowContext(ctx,
+		`SELECT is_group FROM conversations WHERE id = $1`,
+		conversationID,
+	).Scan(&isGroup)
+	return isGroup, err
+}
+
+func (r *MessageRepository) IsBlockedBetween(ctx context.Context, userA, userB string) (bool, error) {
+	var blocked bool
+	err := r.db.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM user_blocks
+			WHERE (blocker_id = $1 AND blocked_user_id = $2)
+			   OR (blocker_id = $2 AND blocked_user_id = $1)
+		)
+	`, userA, userB).Scan(&blocked)
+	return blocked, err
+}
+
 func (r *MessageRepository) GetConversationMembers(ctx context.Context, conversationID string) ([]string, error) {
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT user_id FROM conversation_members WHERE conversation_id = $1`, conversationID)

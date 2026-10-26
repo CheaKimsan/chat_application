@@ -621,7 +621,7 @@ export default function CallPanel({ contactId }: CallPanelProps) {
 
     if (callState === "idle") {
         return (
-            <div className="call-panel-wrapper">
+            <div className="call-panel-wrapper call-panel-wrapper--chat">
                 <div className="call-actions">
                     <button type="button" className="call-action-button call-action-button--ghost" title="Start audio call" onClick={() => startCall("audio")}>
                         <Phone size={16} />

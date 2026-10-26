@@ -78,6 +78,93 @@ func (r *UserRepository) GetAll(ctx context.Context) ([]models.UserResponse, err
 	return users, nil
 }
 
+func (r *UserRepository) GetVisibleTo(ctx context.Context, userID string) ([]models.UserResponse, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT id, username, email, password_hash, role, profile_photo
+		FROM users u
+		WHERE NOT EXISTS (
+			SELECT 1 FROM user_blocks b
+			WHERE (b.blocker_id = $1 AND b.blocked_user_id = u.id)
+			   OR (b.blocker_id = u.id AND b.blocked_user_id = $1)
+		)
+	`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var users []models.UserResponse
+	for rows.Next() {
+		var user models.UserResponse
+		if err := rows.Scan(&user.ID, &user.Username, &user.Email, &user.PasswordHash, &user.Role, &user.ProfilePhoto); err != nil {
+			return nil, err
+		}
+		users = append(users, user)
+	}
+	return users, rows.Err()
+}
+
+func (r *UserRepository) GetBlockedBy(ctx context.Context, blockerID string) ([]models.UserResponse, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT u.id, u.username, u.email, u.password_hash, u.role, u.profile_photo
+		FROM user_blocks b
+		JOIN users u ON u.id = b.blocked_user_id
+		WHERE b.blocker_id = $1
+		ORDER BY u.username
+	`, blockerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var users []models.UserResponse
+	for rows.Next() {
+		var user models.UserResponse
+		if err := rows.Scan(&user.ID, &user.Username, &user.Email, &user.PasswordHash, &user.Role, &user.ProfilePhoto); err != nil {
+			return nil, err
+		}
+		users = append(users, user)
+	}
+	return users, rows.Err()
+}
+
+func (r *UserRepository) Block(ctx context.Context, blockerID, blockedUserID string) error {
+	var exists bool
+	if err := r.db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM users WHERE id = $1)`, blockedUserID).Scan(&exists); err != nil {
+		return err
+	}
+	if !exists {
+		return sql.ErrNoRows
+	}
+
+	_, err := r.db.ExecContext(ctx, `
+		INSERT INTO user_blocks (blocker_id, blocked_user_id)
+		VALUES ($1, $2)
+		ON CONFLICT (blocker_id, blocked_user_id) DO NOTHING
+	`, blockerID, blockedUserID)
+	return err
+}
+
+func (r *UserRepository) Unblock(ctx context.Context, blockerID, blockedUserID string) error {
+	_, err := r.db.ExecContext(ctx,
+		`DELETE FROM user_blocks WHERE blocker_id = $1 AND blocked_user_id = $2`,
+		blockerID, blockedUserID,
+	)
+	return err
+}
+
+func (r *UserRepository) IsBlockedBetween(ctx context.Context, userA, userB string) (bool, error) {
+	var blocked bool
+	err := r.db.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM user_blocks
+			WHERE (blocker_id = $1 AND blocked_user_id = $2)
+			   OR (blocker_id = $2 AND blocked_user_id = $1)
+		)
+	`, userA, userB).Scan(&blocked)
+	return blocked, err
+}
+
 func (r *UserRepository) Update(ctx context.Context, id string, username, email, passwordHash, role, profilePhoto *string) (*models.UserResponse, error) {
 	var u models.UserResponse
 	err := r.db.QueryRowContext(

@@ -3,6 +3,8 @@ import App from './App';
 import './index.css';
 // import './assets/css/style.css';
 import "./assets/css/chat-ui.css";
+import "./assets/css/Chatbot.css";
+import "./assets/css/ShopPage.css";
 import reportWebVitals from './reportWebVitals';
 import { BrowserRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
