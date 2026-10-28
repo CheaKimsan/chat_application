@@ -286,6 +286,76 @@ func (r *MessageRepository) MarkRead(ctx context.Context, msgID, callerID string
 	return "", conversationID.String, readAt, nil
 }
 
+func (r *MessageRepository) MarkReads(ctx context.Context, messageIDs []string, callerID string) ([]models.MessageReadReceipt, error) {
+	callerInt, err := strconv.ParseInt(callerID, 10, 64)
+	if err != nil {
+		return nil, sql.ErrNoRows
+	}
+
+	ids := make([]int64, 0, len(messageIDs))
+	for _, id := range messageIDs {
+		messageInt, err := strconv.ParseInt(id, 10, 64)
+		if err != nil {
+			return nil, sql.ErrNoRows
+		}
+		ids = append(ids, messageInt)
+	}
+
+	rows, err := r.db.QueryContext(ctx, `
+		WITH requested AS (
+			SELECT DISTINCT unnest($1::bigint[]) AS id
+		),
+		direct_reads AS (
+			UPDATE messages m
+			SET read_at = now()
+			FROM requested r
+			WHERE m.id = r.id
+				AND m.to_user = $2
+				AND m.from_user <> $2
+				AND m.read_at IS NULL
+				AND m.deleted_at IS NULL
+			RETURNING m.id, m.from_user, m.conversation_id, m.read_at
+		),
+		group_reads AS (
+			INSERT INTO message_reads (message_id, user_id, read_at)
+			SELECT m.id, $2, now()
+			FROM requested r
+			JOIN messages m ON m.id = r.id
+			JOIN conversation_members cm
+				ON cm.conversation_id = m.conversation_id AND cm.user_id = $2
+			WHERE m.conversation_id IS NOT NULL
+				AND m.to_user IS NULL
+				AND m.from_user <> $2
+				AND m.deleted_at IS NULL
+			ON CONFLICT (message_id, user_id) DO NOTHING
+			RETURNING message_id, read_at
+		)
+		SELECT id::text, from_user::text, COALESCE(conversation_id::text, ''), read_at
+		FROM direct_reads
+		UNION ALL
+		SELECT m.id::text, m.from_user::text, m.conversation_id::text, gr.read_at
+		FROM group_reads gr
+		JOIN messages m ON m.id = gr.message_id
+	`, pq.Array(ids), callerInt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var receipts []models.MessageReadReceipt
+	for rows.Next() {
+		var receipt models.MessageReadReceipt
+		if err := rows.Scan(&receipt.MessageID, &receipt.FromUser, &receipt.ConversationID, &receipt.ReadAt); err != nil {
+			return nil, err
+		}
+		receipts = append(receipts, receipt)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return receipts, nil
+}
+
 func (r *MessageRepository) ExistsFromUser(ctx context.Context, messageID, callerID string) (bool, error) {
 	var exists bool
 	err := r.db.QueryRowContext(ctx,

@@ -3,17 +3,16 @@ package main
 import (
 	"context"
 	"fmt"
-	"golang-jwt-project/internal/middleware"
 	"log"
 	"os"
 	"strconv"
 	"time"
 
-	"golang.org/x/time/rate"
-
 	"golang-jwt-project/database/config"
 	"golang-jwt-project/database/store"
 	"golang-jwt-project/internal/api"
+	"golang-jwt-project/internal/middleware"
+	appredis "golang-jwt-project/internal/redis"
 	"golang-jwt-project/internal/telegrambot"
 	"golang-jwt-project/internal/ws"
 
@@ -36,29 +35,46 @@ func main() {
 	}
 	defer db.Close()
 
+	// Redis must be initialised after loadProjectEnv(), because Init()
+	// reads REDIS_ADDR / REDIS_PASSWORD from the environment.
+	appredis.Init()
+	defer appredis.Close()
+
+	pingCtx, cancelPing := context.WithTimeout(context.Background(), 3*time.Second)
+	if err := appredis.Ping(pingCtx); err != nil {
+		cancelPing()
+		log.Fatalf("failed to connect to redis: %v", err)
+	}
+	cancelPing()
+
 	jwtSecret := []byte(conf.JWTSecret)
 	refreshSecret := []byte(conf.JWTRefreshSecret)
 
 	pool := ws.NewPool()
 	go pool.Start()
 
-	links := telegrambot.NewLoginLinks(2 * time.Minute) // NEW
+	links := telegrambot.NewLoginLinks(2 * time.Minute)
 
 	botCtx, stopBot := context.WithCancel(context.Background())
 	defer stopBot()
 	startTelegramBot(botCtx, links, pool.Count)
 
-	globalLimiter := middleware.NewRateLimiter(rate.Limit(20), 40)
-	authLimiter := middleware.NewRateLimiter(rate.Limit(0.5), 3)
-	defer globalLimiter.Close()
-	defer authLimiter.Close()
+	// Each limiter needs its own KeyPrefix so they don't share
+	// counters, violations, or bans in Redis.
+	//
+	// Old: rate.Limit(20), burst 40  ->  40 requests per 2 seconds
+	globalLimiter := middleware.NewRateLimiter(appredis.Client, 40, 2*time.Second)
+	globalLimiter.KeyPrefix = "global"
 
-	router := api.NewRouter(db, pool, jwtSecret, refreshSecret, globalLimiter, authLimiter, links) // CHANGED
+	// Old: rate.Limit(0.5), burst 3  ->  3 requests per 6 seconds
+	authLimiter := middleware.NewRateLimiter(appredis.Client, 3, 6*time.Second)
+	authLimiter.KeyPrefix = "auth"
+
+	router := api.NewRouter(db, pool, jwtSecret, refreshSecret, globalLimiter, authLimiter, links)
 
 	if err := router.Run(":8000"); err != nil {
 		log.Fatalf("server failed: %v", err)
 	}
-
 }
 
 func loadProjectEnv() error {
@@ -97,6 +113,6 @@ func startTelegramBot(ctx context.Context, links *telegrambot.LoginLinks, online
 		}
 		return fmt.Sprintf("Users online: %d", online())
 	})
-	bot.EnableLogin(links, os.Getenv("TELEGRAM_LOGIN_USER_ID"), os.Getenv("APP_BASE_URL")) // NEW
+	bot.EnableLogin(links, os.Getenv("TELEGRAM_LOGIN_USER_ID"), os.Getenv("APP_BASE_URL"))
 	go bot.Run(ctx)
 }

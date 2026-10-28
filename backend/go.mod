@@ -3,6 +3,7 @@ module golang-jwt-project
 go 1.26.5
 
 require (
+	github.com/alicebob/miniredis/v2 v2.40.0
 	github.com/caarlos0/env/v11 v11.4.1
 	github.com/gin-contrib/cors v1.7.7
 	github.com/gin-gonic/gin v1.12.0
@@ -15,6 +16,7 @@ require (
 	github.com/lib/pq v1.12.3
 	github.com/minio/minio-go/v7 v7.3.0
 	github.com/pion/webrtc/v4 v4.2.20
+	github.com/redis/go-redis/v9 v9.23.0
 	github.com/stretchr/testify v1.12.1
 	github.com/tmc/langchaingo v0.1.15
 	golang.org/x/crypto v0.55.0
@@ -31,7 +33,9 @@ require (
 	github.com/dlclark/regexp2 v1.12.0 // indirect
 	github.com/google/generative-ai-go v0.15.1 // indirect
 	github.com/pkoukk/tiktoken-go v0.1.6 // indirect
+	github.com/yuin/gopher-lua v1.1.1 // indirect
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.61.0 // indirect
+	go.uber.org/atomic v1.12.0 // indirect
 	golang.org/x/oauth2 v0.30.0 // indirect
 	golang.org/x/sync v0.22.0 // indirect
 	google.golang.org/api v0.247.0 // indirect
@@ -107,7 +111,7 @@ require (
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	golang.org/x/arch v0.23.0 // indirect
 	golang.org/x/net v0.58.0 // indirect
-	golang.org/x/sys v0.47.0 // indirect
+	golang.org/x/sys v0.48.0 // indirect
 	golang.org/x/text v0.41.0 // indirect
 	google.golang.org/genai v1.72.0
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20250818200422-3122310a409c // indirect

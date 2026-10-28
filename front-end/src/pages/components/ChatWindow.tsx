@@ -13,7 +13,7 @@ import {
     reqGetConversationMessages,
     reqGetGroupCallHistory,
     reqGetMessages,
-    reqMarkMessageRead,
+    reqMarkMessagesRead,
     reqRemoveReaction,
 } from "../../components/message/core/request";
 import { ArrowDownLeft, ArrowUpRight, Check, CheckCheck, Pencil, Phone, Trash2, Video } from "lucide-react";
@@ -353,36 +353,37 @@ export default function ChatWindow() {
             return !isMessageSeenForChat(message, false, contactIdStr);
         });
 
-        unreadMessages.forEach((message) => {
-            readReceiptRequestsRef.current.add(message.id);
+        const messageIds = unreadMessages.map((message) => message.id);
+        if (messageIds.length === 0) return;
 
-            void reqMarkMessageRead(message.id)
-                .then(() => {
-                    queryClient.setQueryData<ChatMessage[]>(messagesQueryKey, (prev = []) =>
-                        prev.map((msg) => {
-                            if (String(msg.id) !== String(message.id)) return msg;
+        messageIds.forEach((messageId) => readReceiptRequestsRef.current.add(messageId));
 
-                            const nextReaders = Array.from(
-                                new Set([...normalizeReadBy(msg.read_by), String(user.id)])
-                            );
+        void reqMarkMessagesRead(messageIds)
+            .then(() => {
+                const readAt = new Date().toISOString();
+                const messageIdSet = new Set(messageIds);
+                queryClient.setQueryData<ChatMessage[]>(messagesQueryKey, (prev = []) =>
+                    prev.map((message) => {
+                        if (!messageIdSet.has(message.id)) return message;
 
-                            return {
-                                ...msg,
-                                read_by: nextReaders,
-                                read_at: msg.read_at ?? new Date().toISOString(),
-                            };
-                        })
-                    );
-                })
-                .catch((error) => {
-                    const status = error?.response?.status;
-                    // Allow a retry only for network errors or 5xx responses.
-                    if (!status || status >= 500) {
-                        readReceiptRequestsRef.current.delete(message.id);
-                    }
-                    console.error("Failed to mark message as seen:", error);
-                });
-        });
+                        return {
+                            ...message,
+                            read_by: Array.from(
+                                new Set([...normalizeReadBy(message.read_by), String(user.id)])
+                            ),
+                            read_at: message.read_at ?? readAt,
+                        };
+                    })
+                );
+            })
+            .catch((error) => {
+                const status = error?.response?.status;
+                // Allow a retry only for network errors or 5xx responses.
+                if (!status || status >= 500) {
+                    messageIds.forEach((messageId) => readReceiptRequestsRef.current.delete(messageId));
+                }
+                console.error("Failed to mark messages as seen:", error);
+            });
     }, [activeId, contactIdStr, conversationId, isGroup, messages, user?.id, queryClient]);
 
     useEffect(() => {

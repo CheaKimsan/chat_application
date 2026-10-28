@@ -36,6 +36,7 @@ func (h *MessageHandler) RegisterRoutes(router *gin.RouterGroup) {
 	router.POST("/send", h.Send)
 	router.PATCH("/:id/edit", h.Edit)
 	router.DELETE("/:id", h.Delete)
+	router.PATCH("/read", h.MarkReads)
 	router.PATCH("/:id/read", h.MarkRead)
 	router.POST("/:id/upload", h.Upload) // was :messageId
 
@@ -156,6 +157,26 @@ func (h *MessageHandler) MarkRead(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "marked as read"})
+}
+
+func (h *MessageHandler) MarkReads(c *gin.Context) {
+	callerID, _ := middleware.CallerFromContext(c)
+	var req models.MarkMessagesReadRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "message_ids must contain at least one message ID"})
+		return
+	}
+
+	if err := h.messages.MarkReads(c.Request.Context(), callerID, req.MessageIDs); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			c.JSON(http.StatusBadRequest, gin.H{"message": "message_ids must contain valid message IDs"})
+			return
+		}
+		log.Printf("mark messages read failed for user %s: %v", callerID, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"message": "failed to mark messages as read"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "messages marked as read"})
 }
 
 func (h *MessageHandler) Upload(c *gin.Context) {

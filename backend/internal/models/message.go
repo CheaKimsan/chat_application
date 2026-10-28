@@ -1,8 +1,9 @@
 package models
 
 import (
-	"golang-jwt-project/internal/ws"
 	"time"
+
+	"golang-jwt-project/internal/ws"
 )
 
 type SendMessageRequest struct {
@@ -16,6 +17,17 @@ type SendMessageRequest struct {
 type EditMessageRequest struct {
 	Ciphertext *string `json:"ciphertext"`
 	Nonce      *string `json:"nonce"`
+}
+
+type MarkMessagesReadRequest struct {
+	MessageIDs []string `json:"message_ids" binding:"required,min=1"`
+}
+
+type MessageReadReceipt struct {
+	MessageID      string
+	FromUser       string
+	ConversationID string
+	ReadAt         time.Time
 }
 
 type MessageResponse struct {

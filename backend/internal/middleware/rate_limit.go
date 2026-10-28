@@ -1,158 +1,171 @@
 package middleware
 
 import (
+	"context"
 	"net/http"
 	"strconv"
-	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"golang.org/x/time/rate"
+	"github.com/redis/go-redis/v9"
 )
 
-type visitor struct {
-	limiter     *rate.Limiter
-	lastSeen    time.Time
-	violations  int
-	bannedUntil time.Time
-}
-
 type RateLimiter struct {
-	mu       sync.Mutex
-	visitors map[string]*visitor
-	r        rate.Limit
-	burst    int
-	stop     chan struct{}
-
-	// MaxViolations is how many rate-limit hits (429s) an IP can rack up
-	// before it gets temporarily banned outright.
+	redis         *redis.Client
+	limit         int
+	window        time.Duration
+	KeyPrefix     string
 	MaxViolations int
-	// BanDuration is how long an IP stays banned after crossing MaxViolations.
-	BanDuration time.Duration
+	BanDuration   time.Duration
 }
 
-func NewRateLimiter(r rate.Limit, burst int) *RateLimiter {
-	rl := &RateLimiter{
-		visitors:      make(map[string]*visitor),
-		r:             r,
-		burst:         burst,
-		stop:          make(chan struct{}),
-		MaxViolations: 10,              // sensible default, override if needed
-		BanDuration:   3 * time.Minute, // sensible default, override if needed
-	}
-	go rl.cleanupLoop()
-	return rl
-}
-
-// Close stops the background cleanup goroutine. Call this on shutdown
-// (or in tests) to avoid leaking the goroutine.
-func (rl *RateLimiter) Close() {
-	close(rl.stop)
-}
-
-func (rl *RateLimiter) getVisitor(ip string) *visitor {
-	rl.mu.Lock()
-	defer rl.mu.Unlock()
-
-	v, exists := rl.visitors[ip]
-	if !exists {
-		v = &visitor{
-			limiter:  rate.NewLimiter(rl.r, rl.burst),
-			lastSeen: time.Now(),
-		}
-		rl.visitors[ip] = v
-		return v
-	}
-	v.lastSeen = time.Now()
-	return v
-}
-
-func (rl *RateLimiter) cleanupLoop() {
-	ticker := time.NewTicker(time.Minute)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ticker.C:
-			rl.mu.Lock()
-			now := time.Now()
-			for ip, v := range rl.visitors {
-				// Remove entries that are both stale (no traffic in 3 min)
-				// AND not currently banned — a banned IP must stay tracked
-				// until its ban actually expires, otherwise it would reset
-				// on the next cleanup pass and lose its ban.
-				stale := now.Sub(v.lastSeen) > 3*time.Minute
-				stillBanned := now.Before(v.bannedUntil)
-				if stale && !stillBanned {
-					delete(rl.visitors, ip)
-				}
-			}
-			rl.mu.Unlock()
-		case <-rl.stop:
-			return
-		}
+func NewRateLimiter(
+	rdb *redis.Client,
+	limit int,
+	window time.Duration,
+) *RateLimiter {
+	return &RateLimiter{
+		redis:         rdb,
+		limit:         limit,
+		window:        window,
+		MaxViolations: 10,
+		KeyPrefix:     "rate_limit",
+		BanDuration:   3 * time.Minute,
 	}
 }
 
-// IsBanned reports whether an IP is currently under an active ban.
-// Exposed mainly for tests/inspection.
+// Each request is processed atomically by Redis.
+var rateLimitScript = redis.NewScript(`
+	local banKey = KEYS[1]
+	local countKey = KEYS[2]
+	local violationsKey = KEYS[3]
+
+	local limit = tonumber(ARGV[1])
+	local windowSeconds = tonumber(ARGV[2])
+	local maxViolations = tonumber(ARGV[3])
+	local banSeconds = tonumber(ARGV[4])
+
+	-- Reject an IP that is already banned.
+	local banTTL = redis.call("TTL", banKey)
+	if banTTL > 0 or redis.call("EXISTS", banKey) == 1 then
+		return {-1, math.max(banTTL, 1)}
+	end
+
+	-- Increment the request counter.
+	local count = redis.call("INCR", countKey)
+
+	if count == 1 then
+		redis.call("EXPIRE", countKey, windowSeconds)
+	end
+
+	if count > limit then
+		-- Every rejected request adds a violation.
+		local violations = redis.call("INCR", violationsKey)
+
+		if violations >= maxViolations then
+			redis.call("SET", banKey, "1", "EX", banSeconds)
+			redis.call("DEL", violationsKey)
+
+			-- Preserve existing behavior: this request receives 429.
+			return {0, 1}
+		end
+
+		return {0, 1}
+	end
+
+	-- Forgive one previous violation after an allowed request.
+	local violations = tonumber(redis.call("GET", violationsKey) or "0")
+	if violations > 0 then
+		redis.call("DECR", violationsKey)
+		if violations == 1 then
+			redis.call("DEL", violationsKey)
+		end
+	end
+
+	return {1, 0}
+`)
+
+// IsBanned reports whether an IP currently has an active Redis ban.
 func (rl *RateLimiter) IsBanned(ip string) bool {
-	rl.mu.Lock()
-	defer rl.mu.Unlock()
-	v, exists := rl.visitors[ip]
-	if !exists {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	err := rl.redis.Exists(ctx, rl.banKey(ip)).Err()
+	if err != nil {
 		return false
 	}
-	return time.Now().Before(v.bannedUntil)
+
+	return rl.redis.Exists(ctx, rl.banKey(ip)).Val() > 0
+}
+
+func (rl *RateLimiter) banKey(ip string) string {
+	return rl.KeyPrefix + ":{" + ip + "}:ban"
+}
+
+func (rl *RateLimiter) countKey(ip string) string {
+	return rl.KeyPrefix + ":{" + ip + "}:count"
+}
+
+func (rl *RateLimiter) violationsKey(ip string) string {
+	return rl.KeyPrefix + ":{" + ip + "}:violations"
 }
 
 func (rl *RateLimiter) Middleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		ip := c.ClientIP()
-		v := rl.getVisitor(ip)
-
-		rl.mu.Lock()
-
-		// Already banned — reject immediately, don't even touch the limiter.
-		if time.Now().Before(v.bannedUntil) {
-			retryAfter := int(time.Until(v.bannedUntil).Seconds())
-			rl.mu.Unlock()
-			c.Header("Retry-After", strconv.Itoa(retryAfter))
-			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
-				"error": "temporarily blocked due to repeated abuse",
+		if rl.limit <= 0 || rl.window < time.Second ||
+			rl.MaxViolations <= 0 || rl.BanDuration < time.Second {
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
+				"error": "rate limiter is misconfigured",
 			})
 			return
 		}
 
-		allowed := v.limiter.Allow()
-		if !allowed {
-			v.violations++
-			if v.violations >= rl.MaxViolations {
-				v.bannedUntil = time.Now().Add(rl.BanDuration)
-				v.violations = 0 // reset strikes once a ban is issued
-			}
-		} else {
-			// Optional: let good behavior slowly forgive past violations
-			// instead of leaving them at a permanently elevated count.
-			if v.violations > 0 {
-				v.violations--
-			}
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
+		defer cancel()
+
+		ip := c.ClientIP()
+		windowSeconds := int(rl.window / time.Second)
+		banSeconds := int(rl.BanDuration / time.Second)
+
+		result, err := rateLimitScript.Run(
+			ctx,
+			rl.redis,
+			[]string{
+				rl.banKey(ip),
+				rl.countKey(ip),
+				rl.violationsKey(ip),
+			},
+			rl.limit,
+			windowSeconds,
+			rl.MaxViolations,
+			banSeconds,
+		).Int64Slice()
+
+		if err != nil || len(result) != 2 {
+			// Fail closed if Redis is unavailable.
+			c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{
+				"error": "rate limiting service unavailable",
+			})
+			return
 		}
 
-		rl.mu.Unlock()
+		switch result[0] {
+		case -1:
+			c.Header("Retry-After", strconv.FormatInt(result[1], 10))
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
+				"error": "temporarily blocked due to repeated abuse",
+			})
+			return
 
-		if !allowed {
+		case 0:
 			c.Header("Retry-After", "1")
 			c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{
 				"error": "too many requests, please try again later",
 			})
 			return
+
+		default:
+			c.Next()
 		}
-
-		c.Next()
 	}
-}
-
-func (rl *RateLimiter) getLimiter(ip string) *rate.Limiter {
-	return rl.getVisitor(ip).limiter
 }

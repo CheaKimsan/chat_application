@@ -174,6 +174,26 @@ func (s *MessageService) MarkRead(ctx context.Context, callerID, msgID string) e
 	return nil
 }
 
+func (s *MessageService) MarkReads(ctx context.Context, callerID string, messageIDs []string) error {
+	receipts, err := s.messages.MarkReads(ctx, messageIDs, callerID)
+	if err != nil {
+		return err
+	}
+	for _, receipt := range receipts {
+		payload := map[string]interface{}{
+			"type":            "message_read",
+			"message_id":      receipt.MessageID,
+			"read_by":         callerID,
+			"read_at":         receipt.ReadAt,
+		}
+		if receipt.ConversationID != "" {
+			payload["conversation_id"] = receipt.ConversationID
+		}
+		s.pool.SendToUser(receipt.FromUser, payload)
+	}
+	return nil
+}
+
 // VerifyOwnership reports whether messageID exists and was sent by callerID
 // — used to gate file uploads to a message.
 func (s *MessageService) VerifyOwnership(ctx context.Context, messageID, callerID string) (bool, error) {
