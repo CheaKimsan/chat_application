@@ -55,15 +55,6 @@ type keyState struct {
 	suppressed int
 }
 
-// Alerter decides whether an alert is worth sending. Everything that wants to
-// raise an alert calls Alert, and Alerter handles the rest:
-//
-//   - the same key is sent at most once per cooldown (default 10 minutes), and
-//     the number of held-back repeats is reported with the next one
-//   - at most maxPerMinute alerts leave the server per minute overall, so a
-//     failure loop can never flood your phone
-//   - only Warning and Critical are sent; Info is only recorded
-//   - secrets (tokens, passwords, JWTs) are scrubbed before anything is sent
 type Alerter struct {
 	send         func(string)
 	cooldown     time.Duration
@@ -76,8 +67,6 @@ type Alerter struct {
 	recent  []Event
 }
 
-// NewAlerter creates an Alerter. send is called with the final message text,
-// for example (*notify.Telegram).SendAsync. A nil send keeps alerts local.
 func NewAlerter(send func(string)) *Alerter {
 	return &Alerter{
 		send:         send,
@@ -127,7 +116,7 @@ func (a *Alerter) Alert(level Level, key, title, details string) {
 	now := time.Now()
 
 	a.mu.Lock()
-	if len(a.keys) > 500 { // bound memory if keys are ever generated per-request
+	if len(a.keys) > 500 {
 		a.keys = map[string]*keyState{}
 	}
 	st := a.keys[key]
@@ -224,6 +213,7 @@ var scrubbers = []struct {
 
 // scrub removes secrets and shortens long text. Telegram messages are not
 // end-to-end encrypted, so nothing sensitive should ever be sent to it.
+
 func scrub(s string) string {
 	for _, r := range scrubbers {
 		s = r.re.ReplaceAllString(s, r.with)

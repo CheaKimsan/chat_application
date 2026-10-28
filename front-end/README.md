@@ -19,6 +19,12 @@ You will also see any lint errors in the console.
 Launches the test runner in the interactive watch mode.\
 See the section about [running tests](https://facebook.github.io/create-react-app/docs/running-tests) for more information.
 
+### `npm run test:e2e`
+
+Runs the Playwright end-to-end tests, starting the development server automatically.
+On a new machine, install the Chromium browser first with `npx playwright install chromium`.
+The login tests mock the authentication API and do not require a backend or real account.
+
 ### `npm run build`
 
 Builds the app for production to the `build` folder.\
